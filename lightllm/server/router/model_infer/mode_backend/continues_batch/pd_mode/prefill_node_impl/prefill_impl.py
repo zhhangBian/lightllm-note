@@ -24,6 +24,7 @@ from lightllm.utils.dist_utils import create_new_group_for_current_dp
 logger = init_logger(__name__)
 
 
+# P节点的实现
 class ChunckedPrefillForPrefillNode(ModeBackend):
     def __init__(self, info_queue: mp.Queue, mem_queue: mp.Queue) -> None:
         super().__init__()
@@ -58,8 +59,10 @@ class ChunckedPrefillForPrefillNode(ModeBackend):
         return
 
     def decode(self):
+        # 获取当前的请求，并进行分类
         uinit_reqs, aborted_reqs, ok_finished_reqs, prefill_reqs, decode_reqs = self._get_classed_reqs(
             g_infer_context.infer_req_ids,
+            # 当前的decode节点只进行prefill操作，不进行decode操作
             no_decode=True,
         )
         assert len(uinit_reqs) == 0
@@ -67,46 +70,64 @@ class ChunckedPrefillForPrefillNode(ModeBackend):
 
         self._filter_reqs(aborted_reqs)
 
+        # 存在完成了prefill的请求，则不需要进一步的计算，创建KVMoveTask，并放入到任务队列中
         if ok_finished_reqs:
+            # 冻结完成了prefill的请求，并创建KVMoveTask，并放入到任务队列中
             self.prefill_req_frozen_tokens_and_put_to_kvmove_taskqueue(ok_finished_reqs)
+            # 过滤完成了prefill的请求
             self._filter_reqs(ok_finished_reqs)
 
+        # 如果存在需要进行prefill的请求，则进行prefill操作
         if prefill_reqs:
+            # 准备prefill的输入
             model_input, run_reqs = prepare_prefill_inputs(
                 prefill_reqs, is_chuncked_mode=True, is_multimodal=self.is_multimodal
             )
 
+            # 进行prefill操作
             model_output = self.model.forward(model_input)
+            # 获取logits
             logits = model_output.logits
+            # 获取下一个token的id和概率
             next_token_ids, next_token_probs = sample(logits, run_reqs, self.eos_id)
+            # 将next_token_ids和next_token_probs转换为numpy数组
             next_token_ids = next_token_ids.detach().cpu().numpy()
+            # 将next_token_probs转换为numpy数组
             next_token_logprobs = torch.log(next_token_probs).detach().cpu().numpy()
 
+            # 进行后处理
             self._post_handle(
                 run_reqs, next_token_ids, next_token_logprobs, is_chuncked_mode=True, do_filter_finished_reqs=False
             )
         return
 
+    # 冻结完成了prefill的请求，并创建KVMoveTask，并放入到任务队列中
     def prefill_req_frozen_tokens_and_put_to_kvmove_taskqueue(self, run_reqs: List[InferReq]):
         # 提前在radix cache中回收相关的信息，并添加引用信息
         if self.is_master_in_dp:
             logger.info("prefill_req_handle_and_frozen_tokens")
         g_infer_state_lock.acquire()
         try:
+            # 遍历当前的请求，并进行处理
             for req in run_reqs:
                 req: InferReq = req
+                # 对于输入token的指针序列
                 key = req.get_input_token_ids()[0 : req.cur_kv_len]
                 key = torch.tensor(key, dtype=torch.int64, device="cpu")
                 value = self.model.req_manager.req_to_token_indexs[req.req_idx][: req.cur_kv_len].detach().cpu()
                 prefix_len = self.radix_cache.insert(key, value)
+                # 如果存在共享的kv node，则释放相应的kv node的引用计数
                 old_prefix_len = 0 if req.shared_kv_node is None else req.shared_kv_node.node_prefix_total_len
+                # 释放相应的radix cache对应的token
                 self.model.mem_manager.free(
                     self.model.req_manager.req_to_token_indexs[req.req_idx][old_prefix_len:prefix_len]
                 )
+                # 如果存在共享的kv node，则释放相应的kv node的引用计数
                 if req.shared_kv_node is not None:
                     self.radix_cache.dec_node_ref_counter(req.shared_kv_node)
                     req.shared_kv_node = None
 
+                # 将当前的请求的kv长度设置为0
                 req.cur_kv_len = 0
                 req.shm_req.shm_cur_kv_len = 0
 
@@ -121,6 +142,7 @@ class ChunckedPrefillForPrefillNode(ModeBackend):
                     assert len(key) == len(value)
                     # 将下面的请求放入到任务队列中, 注意要使用raidx cache 返回的value
                     decode_node_info = DecodeNodeInfo(**req.shm_req.sample_params.move_kv_to_decode_node.to_dict())
+                    # 完成计算后创建相应的KVMoveTask
                     task = KVMoveTask(
                         group_request_id=req.shm_req.group_req_id,
                         input_tokens=key.tolist(),

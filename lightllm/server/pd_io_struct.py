@@ -13,7 +13,9 @@ logger = init_logger(__name__)
 class NodeRole(enum.Enum):
     P = "prefill"
     D = "decode"
+    # 普通的混合计算节点
     NORMAL = "normal"
+    # 中央协调节点
     PD_MASTER = "pd_master"
 
     def is_D(self):
@@ -92,6 +94,7 @@ class UpKVStatus:
         return
 
 
+# 代表了decode节点的信息
 @dataclass
 class DecodeNodeInfo:
     node_id: int
@@ -101,6 +104,7 @@ class DecodeNodeInfo:
     pd_master_node_id: int
 
 
+# 代表了prefill节点和decode节点进行通信的连接信息
 @dataclass
 class PDTransJoinInfo:
     decode_id: int
@@ -114,6 +118,7 @@ class PDTransJoinInfo:
     connect_id: str
 
 
+# 代表了prefill节点和decode节点进行通信的断开信息
 @dataclass
 class PDTransLeaveInfo:
     decode_id: int
@@ -123,6 +128,7 @@ class PDTransLeaveInfo:
     connect_id: str
 
 
+# 代表了相关的KVC传输任务
 @dataclass
 class KVMoveTask:
     group_request_id: int
@@ -147,6 +153,7 @@ class KVMoveTask:
             logger.error(error_info)
             raise ValueError(error_info)
 
+    # 用于prefill日志打印
     def to_prefill_log_info(self):
         v_len = None if self.prefill_token_indexes is None else len(self.prefill_token_indexes)
         d_i = self.prefill_dp_index
@@ -154,6 +161,7 @@ class KVMoveTask:
         log = f"id: {id} in_len:{len(self.input_tokens)} v_len: {v_len} move_len: {self.move_kv_len} dp_index:{d_i}"
         return log + f" connect_id: {self.connect_id}"
 
+    # 用于decode日志打印
     def to_decode_log_info(self):
         v_len = None if self.decode_token_indexes is None else len(self.decode_token_indexes)
         d_i = self.decode_dp_index
@@ -171,6 +179,7 @@ class KVMoveTask:
             return 100000000000
 
 
+# 代表了相关的KVMoveTask的组
 @dataclass
 class KVMoveTaskGroup:
     tasks: List[KVMoveTask]

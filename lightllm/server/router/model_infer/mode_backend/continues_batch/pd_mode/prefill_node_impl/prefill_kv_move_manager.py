@@ -28,6 +28,7 @@ KV_MOVE_MAX_NUM = 16
 logger = init_logger(__name__)
 
 
+# 负责prefill节点的kv传输管理
 class PrefillKVMoveManager:
     def __init__(self, args, info_queue: mp.Queue, mem_queues: List[mp.Queue]):
         self.args = args

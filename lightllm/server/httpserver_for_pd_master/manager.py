@@ -29,6 +29,7 @@ from lightllm.utils.error_utils import ServerBusyError
 logger = init_logger(__name__)
 
 
+# 中央协调节点，负责协调 prefill 和 decode 节点，以及处理请求的转发
 class HttpServerManagerForPDMaster:
     def __init__(
         self,
@@ -110,6 +111,7 @@ class HttpServerManagerForPDMaster:
     ) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
         import random
 
+        # 当前随机选择了PD节点，这肯定是不可行的
         p_node = random.choice(self.prefill_nodes)
         d_node = random.choice(self.decode_nodes)
         return p_node, d_node
@@ -133,6 +135,7 @@ class HttpServerManagerForPDMaster:
 
             p_node, d_node = await self.select_p_d_node(prompt, sampling_params, multimodal_params)
 
+            # 等待token生成
             results_generator = self._wait_to_token_package(
                 p_node,
                 d_node,

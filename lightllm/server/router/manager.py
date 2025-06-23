@@ -117,7 +117,9 @@ class RouterManager:
         # 初始化模型
         self.model_rpc_servers = []
         # 用于 kv move 管理进程 和 推理进程进行task信息的交互。
+        # 会在多个对象之间共享，实现共享信息的传递
         self.info_queue: mp.Queue = mp.Queue()
+        # 会在多个对象之间共享，实现共享信息的传递
         self.mem_queues: List[torch.multiprocessing.Queue] = [
             torch.multiprocessing.Queue() for _ in range(self.node_world_size)
         ]

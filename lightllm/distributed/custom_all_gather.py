@@ -46,8 +46,10 @@ def is_weak_contiguous(inp: torch.Tensor):
     )
 
 
+# 自定义的all_gather通信
 class CustomAllgather:
 
+    # 支持的world_size
     _SUPPORTED_WORLD_SIZES = [2, 4, 6, 8]
 
     # max_size: max supported allgather size

@@ -24,6 +24,7 @@ from lightllm.utils.dist_utils import create_new_group_for_current_dp
 logger = init_logger(__name__)
 
 
+# D节点的实现
 class ContinuesBatchBackendForDecodeNode(ModeBackend):
     def __init__(self, info_queue: mp.Queue, mem_queue: mp.Queue) -> None:
         super().__init__()
@@ -54,10 +55,12 @@ class ContinuesBatchBackendForDecodeNode(ModeBackend):
         return
 
     def prefill(self, reqs: List[Tuple]):
+        # 在PD分离模式下，Decode节点不处理prefill请求
         self._init_reqs(reqs, init_req_obj=False)
         return
 
     def decode(self):
+        # 获取当前的请求，并进行分类
         uninit_reqs, aborted_reqs, ok_finished_reqs, prefill_reqs, decode_reqs = self._get_classed_reqs(
             g_infer_context.infer_req_ids,
             no_decode=False,
@@ -67,12 +70,21 @@ class ContinuesBatchBackendForDecodeNode(ModeBackend):
 
         self._filter_reqs(aborted_reqs)
 
+        # 如果存在需要进行decode的请求，则进行decode操作
         if decode_reqs:
 
+            # 准备decode的输入
             model_input, run_reqs = prepare_decode_inputs(decode_reqs)
+            # 进行decode操作
             model_output = self.model.forward(model_input)
+            # 获取logits
             logits = model_output.logits
 
+            # 获取下一个token的id和概率
+            next_token_ids, next_token_probs = sample(logits, run_reqs, self.eos_id)
+            # 将next_token_ids和next_token_probs转换为numpy数组
+            next_token_ids = next_token_ids.detach().cpu().numpy()
+            # 将next_token_probs转换为numpy数组
             self._overlap_req_init_and_filter(
                 uninit_reqs=uninit_reqs, ok_finished_reqs=ok_finished_reqs, clear_list=True
             )

@@ -327,6 +327,7 @@ def normal_or_p_d_start(args):
     return
 
 
+# 启动pd_master节点
 def pd_master_start(args):
     set_unique_server_name(args)
     if args.run_mode != "pd_master":

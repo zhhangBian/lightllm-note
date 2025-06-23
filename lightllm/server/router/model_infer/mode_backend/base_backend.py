@@ -225,12 +225,15 @@ class ModeBackend:
                 ok_finished_reqs.append(req_obj)
                 continue
 
+            # 如果不需要decode，则将请求分为prefill请求
             if no_decode:
                 prefill_reqs.append(req_obj)
                 continue
 
+            # 如果当前的请求已经到达了需要输出的阶段，则将请求分为decode请求
             is_decode = req_obj.cur_kv_len + 1 == req_obj.get_cur_total_len()
 
+            # 如果当前的请求不需要decode，则将请求分为prefill请求
             if not is_decode:
                 prefill_reqs.append(req_obj)
             else:
