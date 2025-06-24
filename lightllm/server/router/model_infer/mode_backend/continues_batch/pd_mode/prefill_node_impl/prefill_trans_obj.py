@@ -21,6 +21,7 @@ from ..utils import join_if_alive, clear_queue
 logger = init_logger(__name__)
 
 
+# 代表了prefill节点和decode节点进行通信的连接对象
 @dataclass
 class KVTransConnectObj:
     connect_id: str = None
@@ -104,6 +105,8 @@ class KVTransConnectObj:
         logger.info(f"create KVTransConnectObj success: {self.to_log_info()}")
         return
 
+    # 根据可以p和d节点间协商得到的 max_kv_trans_token_num 限制，将排队等待
+    # 传输的请求打包成一个可以传输的list组。
     def _get_request_tasks(self, datas: List[KVMoveTask]):
         """
         根据可以p和d节点间协商得到的 max_kv_trans_token_num 限制，将排队等待
@@ -326,6 +329,7 @@ class KVTransConnectObj:
         return log
 
 
+# 对传输进程的封装
 @dataclass
 class KVTransProcess:
     process: mp.Process = None
@@ -365,6 +369,7 @@ class KVTransProcess:
             logger.exception(str(e))
             return False
 
+    # 检查传输进程的健康状态
     def is_trans_process_health(self):
         try:
             process = psutil.Process(self.process.pid)
@@ -376,5 +381,6 @@ class KVTransProcess:
         except:
             return False
 
+    # 杀死传输进程
     def killself(self):
         self.process.kill()

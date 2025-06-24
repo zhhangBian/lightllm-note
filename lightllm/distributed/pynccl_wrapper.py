@@ -53,6 +53,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# 找到相应的nccl库
 def find_nccl_library() -> str:
     """
     We either use the library file specified by the `VLLM_NCCL_SO_PATH`
@@ -161,11 +162,15 @@ class ncclRedOpTypeEnum:
 
 @dataclass
 class Function:
+    # 函数名
     name: str
+    # 返回值的类型
     restype: Any
+    # 需要的参数的类型列表
     argtypes: List[Any]
 
 
+# 用python对nccl进行封装，可以支持全部的功能
 class NCCLLibrary:
     exported_functions = [
         # const char* ncclGetErrorString(ncclResult_t result)
@@ -291,6 +296,7 @@ class NCCLLibrary:
     def ncclGetErrorString(self, result: ncclResult_t) -> str:
         return self._funcs["ncclGetErrorString"](result).decode("utf-8")
 
+    # 检查nccl的返回值：相当于封装了一层进行错误处理
     def NCCL_CHECK(self, result: ncclResult_t) -> None:
         if result != 0:
             error_str = self.ncclGetErrorString(result)
@@ -306,16 +312,19 @@ class NCCLLibrary:
         patch = version_str[3:].lstrip("0")
         return f"{major}.{minor}.{patch}"
 
+    # 获取nccl的唯一id
     def ncclGetUniqueId(self) -> ncclUniqueId:
         unique_id = ncclUniqueId()
         self.NCCL_CHECK(self._funcs["ncclGetUniqueId"](ctypes.byref(unique_id)))
         return unique_id
 
+    # 初始化nccl的通信组
     def ncclCommInitRank(self, world_size: int, unique_id: ncclUniqueId, rank: int) -> ncclComm_t:
         comm = ncclComm_t()
         self.NCCL_CHECK(self._funcs["ncclCommInitRank"](ctypes.byref(comm), world_size, unique_id, rank))
         return comm
 
+    # 执行all_reduce操作
     def ncclAllReduce(
         self,
         sendbuff: buffer_type,
@@ -333,6 +342,7 @@ class NCCLLibrary:
         # by ctypes automatically
         self.NCCL_CHECK(self._funcs["ncclAllReduce"](sendbuff, recvbuff, count, datatype, op, comm, stream))
 
+    # 执行reduce_scatter操作
     def ncclReduceScatter(
         self,
         sendbuff: buffer_type,
@@ -350,6 +360,7 @@ class NCCLLibrary:
         # by ctypes automatically
         self.NCCL_CHECK(self._funcs["ncclReduceScatter"](sendbuff, recvbuff, count, datatype, op, comm, stream))
 
+    # 执行all_gather操作
     def ncclAllGather(
         self,
         sendbuff: buffer_type,
@@ -365,16 +376,19 @@ class NCCLLibrary:
         # by ctypes automatically
         self.NCCL_CHECK(self._funcs["ncclAllGather"](sendbuff, recvbuff, count, datatype, comm, stream))
 
+    # 执行send操作
     def ncclSend(
         self, sendbuff: buffer_type, count: int, datatype: int, dest: int, comm: ncclComm_t, stream: cudaStream_t
     ) -> None:
         self.NCCL_CHECK(self._funcs["ncclSend"](sendbuff, count, datatype, dest, comm, stream))
 
+    # 执行recv操作
     def ncclRecv(
         self, recvbuff: buffer_type, count: int, datatype: int, src: int, comm: ncclComm_t, stream: cudaStream_t
     ) -> None:
         self.NCCL_CHECK(self._funcs["ncclRecv"](recvbuff, count, datatype, src, comm, stream))
 
+    # 执行broadcast操作
     def ncclBroadcast(
         self,
         sendbuff: buffer_type,
@@ -387,6 +401,7 @@ class NCCLLibrary:
     ) -> None:
         self.NCCL_CHECK(self._funcs["ncclBroadcast"](sendbuff, recvbuff, count, datatype, root, comm, stream))
 
+    # 销毁nccl的通信组
     def ncclCommDestroy(self, comm: ncclComm_t) -> None:
         self.NCCL_CHECK(self._funcs["ncclCommDestroy"](comm))
 

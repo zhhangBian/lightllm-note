@@ -48,6 +48,7 @@ class PrefillKVMoveManager:
         self.connect_id_to_trans_obj: Dict[str, KVTransConnectObj] = {}
 
         for port in self.args.pd_node_infer_rpyc_ports:
+            # 当gpu不在同一个节点上时，需要使用unix socket进行通信
             socket_path = f"/tmp/{get_unique_server_name()}_prefill_node_infer_rpyc_{port}"
             from rpyc.utils.factory import unix_connect
 
@@ -79,16 +80,20 @@ class PrefillKVMoveManager:
     # 主任务循环，接收需要进行kv传输的请求进行处理
     # ==================================================================================
 
+    # 轮询尝试获取传输请求，并分发给相关卡的处理队列
     def task_dispatcher_loop(self):
         try:
             # 获取任务，并分发给相关卡的处理队列
             while True:
                 move_task: KVMoveTask = self.info_queue.get()
                 try:
+                    # 获取传输对象
                     trans_obj = self.__get_trans_obj(move_task)
+                    # 将传输请求放入到传输对象的处理队列中
                     trans_obj.request_kv_trans_task_queue.put(move_task)
                 except BaseException as e:
                     logger.exception(str(e))
+                    # 将传输请求放入到释放任务队列中
                     self.put_to_release_task_queue(move_task)
                 finally:
                     trans_obj = None
@@ -101,10 +106,13 @@ class PrefillKVMoveManager:
     # 请求出错或者完成kv传输后的处理队列和线程loop
     # ==================================================================================
 
+    # 将传输请求放入到释放任务队列中
     def put_to_release_task_queue(self, task: Union[KVMoveTask, List[KVMoveTask]]):
         if isinstance(task, KVMoveTask):
+            # 将传输请求放入到释放任务队列中
             self.release_task_queue.put(task)
         elif isinstance(task, list):
+            # 将传输请求列表放入到释放任务队列中
             self.release_task_queue.put_list(task)
         else:
             logger.error("error input in put_to_release_task_queue func")
@@ -125,7 +133,9 @@ class PrefillKVMoveManager:
 
     def check_trans_process_loop(self):
         try:
+            # 轮询，每10s检测一次
             while True:
+                # 遍历所有卡，检测传输进程的健康状态
                 for device_id in range(self.node_world_size):
                     if not self.kv_trans_processes[device_id].is_trans_process_health():
                         raise Exception(f"device_id {device_id} kv process is unhealth")
@@ -193,6 +203,7 @@ class PrefillKVMoveManager:
                 logger.error(f"remove tran obj decode_node_id {trans_obj.decode_node_id}")
         return
 
+    # 建立连接，通过获取一个连接对象，并返回
     def __get_trans_obj(self, task: KVMoveTask):
         self.__remove_dead_trans_obj()
         # 如果已经存在连接对象，直接返回
@@ -209,6 +220,7 @@ class PrefillKVMoveManager:
         self.connect_id_to_trans_obj[trans_obj.connect_id] = trans_obj
         return trans_obj
 
+    # 移除已经死亡的连接对象
     def __remove_dead_trans_obj(self):
         del_connect_ids = []
         for connect_id, t_obj in self.connect_id_to_trans_obj.items():

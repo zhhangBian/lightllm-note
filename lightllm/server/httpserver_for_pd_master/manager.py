@@ -68,6 +68,7 @@ class HttpServerManagerForPDMaster:
         logger.info(f"mode: {pd_client.mode} url: {pd_client.client_ip_port} registed")
         return
 
+    # 移除PD节点
     async def remove_pd(self, pd_info_json):
         pd_client = PD_Client_Obj(**pd_info_json)
         try:
@@ -106,6 +107,7 @@ class HttpServerManagerForPDMaster:
             audio_tokens += self.tokenizer.get_audio_token_length(audio)
         return len(prompt_ids) + image_tokens + img_count + audio_tokens + audio_count
 
+    # 选择合适的PD节点
     async def select_p_d_node(
         self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams
     ) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
@@ -116,6 +118,8 @@ class HttpServerManagerForPDMaster:
         d_node = random.choice(self.decode_nodes)
         return p_node, d_node
 
+    # master负责协调整体的生成，用于生成token
+    # 上层对token的获取就是通过master
     async def generate(
         self,
         prompt: Union[str, List[int]],
@@ -133,9 +137,10 @@ class HttpServerManagerForPDMaster:
             self.metric_client.counter_inc("lightllm_request_count")
             self.metric_client.histogram_observe("lightllm_request_max_new_tokens", sampling_params.max_new_tokens)
 
+            # 选择请求对应的PD节点进行生成
             p_node, d_node = await self.select_p_d_node(prompt, sampling_params, multimodal_params)
 
-            # 等待token生成
+            # 传入指定的PD节点，获取token的迭代生成流
             results_generator = self._wait_to_token_package(
                 p_node,
                 d_node,
@@ -145,6 +150,7 @@ class HttpServerManagerForPDMaster:
                 multimodal_params,
                 request,
             )
+            # 本身也作为一个迭代式的生成器，将token流返回给上层
             async for sub_req_id, request_output, metadata, finish_status in results_generator:
                 yield sub_req_id, request_output, metadata, finish_status
 
@@ -178,6 +184,7 @@ class HttpServerManagerForPDMaster:
         }
         return req
 
+    # 从 prefill 和 decode 节点获取生成的 token 流
     async def fetch_stream(
         self,
         p_node: PD_Client_Obj,
@@ -189,11 +196,13 @@ class HttpServerManagerForPDMaster:
     ):
         group_request_id = sampling_params.group_request_id
 
+        # 跟踪请求的状态
         req_status = ReqStatus(group_request_id, p_node, d_node)
         self.req_id_to_out_inf[group_request_id] = req_status
 
         up_status_event = req_status.up_status_event
 
+        # 收集decode信息，为后续的KVC转移做准备
         d_start_args = d_node.start_args
         decode_node_dict = {
             "node_id": d_start_args["pd_node_id"],
@@ -203,18 +212,23 @@ class HttpServerManagerForPDMaster:
             "pd_master_node_id": self.args.pd_node_id,
         }
 
+        # 修改相应的采样参数
+        # 设置max_new_tokens为1，因为prefill只需要一个token
         old_max_new_tokens = sampling_params.max_new_tokens
         sampling_params.max_new_tokens = 1
         sampling_params.move_kv_to_decode_node.initialize(decode_node_dict if old_max_new_tokens != 1 else None)
         sampling_params.suggested_dp_index = -1
 
+        # 发送请求到 prefill 节点
         await p_node.websocket.send_bytes(pickle.dumps((ObjType.REQ, (prompt, sampling_params, multimodal_params))))
 
+        # 等待并处理 prefill 节点的响应
         while True:
             await req_status.wait_to_ready()
             if await request.is_disconnected():
                 raise Exception(f"req_id {group_request_id} disconnected")
 
+            # 如果 prefill 节点返回了 token，则处理这些 token
             if await req_status.can_read(self.req_id_to_out_inf):
                 token_list = await req_status.pop_all_tokens()
                 for sub_req_id, request_output, metadata, finish_status in token_list:
@@ -226,6 +240,7 @@ class HttpServerManagerForPDMaster:
                     if metadata.get("prompt_ids", None) is not None:
                         prompt_ids = metadata.get("prompt_ids")
                         prompt_ids.append(metadata.get("id"))
+                    # 将 token 流返回给上层，直到完成prefill
                     yield sub_req_id, request_output, metadata, finish_status
                 break
 
@@ -233,18 +248,22 @@ class HttpServerManagerForPDMaster:
         if old_max_new_tokens == 1:
             return
 
+        # 等待 KV 缓存转移
         try:
             await asyncio.wait_for(up_status_event.wait(), timeout=60)
         except asyncio.TimeoutError:
             logger.warning(f"group_request_id: {group_request_id} kv move time out err, server is busy now.")
             raise ServerBusyError()
 
+        # 修改采样参数，准备发送请求到 decode 节点
         sampling_params.move_kv_to_decode_node.initialize(None)
         sampling_params.max_new_tokens = old_max_new_tokens - 1
         sampling_params.suggested_dp_index = up_status_event.upkv_status.dp_index
 
+        # 发送请求到 decode 节点
         await d_node.websocket.send_bytes(pickle.dumps((ObjType.REQ, (prompt_ids, sampling_params, multimodal_params))))
 
+        # 等待并处理 decode 节点的响应
         while True:
             await req_status.wait_to_ready()
             if await request.is_disconnected():
@@ -256,6 +275,7 @@ class HttpServerManagerForPDMaster:
 
         return
 
+    # 等待并处理生成的token
     async def _wait_to_token_package(
         self,
         p_node: PD_Client_Obj,
@@ -272,6 +292,7 @@ class HttpServerManagerForPDMaster:
         unfinished_count = sampling_params.best_of
         is_first_token = True
 
+        # 从 prefill 和 decode 节点获取生成的 token 流
         async for sub_req_id, out_str, metadata, finish_status in self.fetch_stream(
             p_node, d_node, prompt, sampling_params, multimodal_params, request
         ):
@@ -285,6 +306,7 @@ class HttpServerManagerForPDMaster:
                 is_first_token = False
                 self.first_time_costs.add(first_token_cost_ms)
 
+            # 一个yield，使得成为了一个异步生成器
             yield sub_req_id, out_str, metadata, finish_status
             if finish_status.is_finished():
                 unfinished_count -= 1

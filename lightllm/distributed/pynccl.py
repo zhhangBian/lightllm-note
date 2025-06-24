@@ -222,6 +222,7 @@ class PyNcclCommunicator:
     def destroy(self):
         self.nccl.ncclCommDestroy(self.comm)
 
+    # 进行all_reduce操作
     def all_reduce(self, in_tensor: torch.Tensor, op: ReduceOp = ReduceOp.SUM, stream=None) -> torch.Tensor:
         if self.disabled:
             return None

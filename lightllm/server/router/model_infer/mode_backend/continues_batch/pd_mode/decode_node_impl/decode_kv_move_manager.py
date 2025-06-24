@@ -51,6 +51,7 @@ class DecodeKVMoveManager(rpyc.Service):
 
         self.connect_id_to_trans_obj: Dict[str, KVTransConnectObj] = {}
         for port in self.args.pd_node_infer_rpyc_ports:
+            # 当gpu不在同一个节点上时，需要使用unix socket进行通信
             socket_path = f"/tmp/{get_unique_server_name()}_decode_node_infer_rpyc_{port}"
             from rpyc.utils.factory import unix_connect
 

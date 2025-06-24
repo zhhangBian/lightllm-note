@@ -40,6 +40,7 @@ class ObjType(enum.Enum):
     TOKEN_PACKS = 3
 
 
+# 用于代表相应的PD节点的抽象
 @dataclass
 class PD_Client_Obj:
     node_id: int
