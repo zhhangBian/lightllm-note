@@ -83,6 +83,7 @@ class G_Objs:
 
         if args.run_mode == "pd_master":
             self.metric_client = MetricClient(args.metric_port)
+            # 对于pd_master而言启动一个特殊的httpserver manager
             self.httpserver_manager = HttpServerManagerForPDMaster(
                 args,
                 metric_port=args.metric_port,
@@ -91,6 +92,7 @@ class G_Objs:
             init_tokenizer(args)  # for openai api
             SamplingParams.load_generation_cfg(args.model_dir)
             self.metric_client = MetricClient(args.metric_port)
+            # 其余类型启动正常的httpserver manager
             self.httpserver_manager = HttpServerManager(
                 args,
                 router_port=args.router_port,

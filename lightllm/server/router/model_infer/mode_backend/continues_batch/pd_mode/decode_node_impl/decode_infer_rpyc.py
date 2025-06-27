@@ -87,6 +87,7 @@ class PDDecodeInferRpcServer(rpyc.Service):
                 )
             return None
 
+        # 在接收KVC时，也使用prefix cache进行压缩优化
         key = torch.tensor(move_task.input_tokens, dtype=torch.int64, device="cpu")
         tree_node, kv_len, fused_token_indexes = self.backend.radix_cache.match_prefix(key, update_refs=True)
         # 如果没匹配到，说明长度是0， 将fused_token_indexes做一下转换
@@ -126,6 +127,7 @@ class PDDecodeInferRpcServer(rpyc.Service):
         finally:
             release_acquired_lock()
 
+    # 将接收到的KV缓存放入到radix cache中进行管理
     def _put_kv_received_to_radix_cache(self, group_req_id: int):
         move_task, tree_node, fused_token_indexes = g_kv_move_task_cache.pop(group_req_id)
         radix_cache = self.backend.radix_cache

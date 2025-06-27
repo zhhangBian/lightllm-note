@@ -25,6 +25,7 @@ async def timer_log(manager: HttpServerManager):
     return
 
 
+# 主要控制循环，负责与pd_master进行连接，并处理pd_master发来的请求
 async def pd_handle_loop(manager: HttpServerManager):
     assert manager.args.host not in ["127.0.0.1", "localhost"], "pd mode must specify host ip"
     if manager.args.host in ["0.0.0.0"]:
@@ -38,6 +39,7 @@ async def pd_handle_loop(manager: HttpServerManager):
 
     while True:
         try:
+            # 获取所有的pd_master对象
             id_to_pd_master_obj = await _get_pd_master_objs(manager.args)
             logger.info(f"get pd_master_objs {id_to_pd_master_obj}")
 
@@ -50,6 +52,7 @@ async def pd_handle_loop(manager: HttpServerManager):
 
                 for node_id, pd_master_obj in id_to_pd_master_obj.items():
                     if node_id not in id_to_handle_task:
+                        # 处理单个pd_master的连接，响应pd_master发来的请求
                         id_to_handle_task[node_id] = asyncio.create_task(_pd_handle_task(manager, pd_master_obj))
 
             await asyncio.sleep(30)
@@ -70,6 +73,7 @@ async def _pd_handle_task(manager: HttpServerManager, pd_master_obj: PD_Master_O
     while True:
         forwarding_tokens_task = None
         try:
+            # 建立WebSocket连接：连接到PD Master的注册端点
             uri = f"ws://{pd_master_obj.host_ip_port}/pd_register"
             async with websockets.connect(
                 uri, max_size=get_lightllm_websocket_max_message_size(), max_queue=(2048 * 1024, 2048 * 1023)  # 关键修改
@@ -88,10 +92,12 @@ async def _pd_handle_task(manager: HttpServerManager, pd_master_obj: PD_Master_O
                     "start_args": args_dict,
                 }
 
+                # 发送注册信息：向PD Master注册当前节点的基本信息
                 await websocket.send(json.dumps(regist_json))
                 logger.info(f"Sent registration JSON: {regist_json}")
 
                 # 转发任务
+                # 先创建相应的转发任务，再执行相应的推理任务
                 forwarding_tokens_task = asyncio.create_task(_up_tokens_to_pd_master(forwarding_queue, websocket))
 
                 # 接收 pd master 发来的请求，并推理后，将生成的token转发回pd master。
@@ -100,6 +106,7 @@ async def _pd_handle_task(manager: HttpServerManager, pd_master_obj: PD_Master_O
                     obj = pickle.loads(recv_bytes)
                     if obj[0] == ObjType.REQ:
                         prompt, sampling_params, multimodal_params = obj[1]
+                        # 执行推理：将请求转发给本地推理引擎
                         asyncio.create_task(
                             _pd_process_generate(manager, prompt, sampling_params, multimodal_params, forwarding_queue)
                         )
@@ -177,8 +184,11 @@ async def _pd_process_generate(
 
 
 # 转发token的task
+# 创建监听任务用于等待token的生成
 async def _up_tokens_to_pd_master(forwarding_queue: AsyncQueue, websocket):
     while True:
+        # 等待token生成
         handle_list = await forwarding_queue.wait_to_get_all_data()
+        # 如果存在token，则发送给pd_master
         if handle_list:
             await websocket.send(pickle.dumps((ObjType.TOKEN_PACKS, handle_list)))

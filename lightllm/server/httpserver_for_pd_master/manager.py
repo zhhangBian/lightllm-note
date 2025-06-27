@@ -107,7 +107,7 @@ class HttpServerManagerForPDMaster:
             audio_tokens += self.tokenizer.get_audio_token_length(audio)
         return len(prompt_ids) + image_tokens + img_count + audio_tokens + audio_count
 
-    # 选择合适的PD节点
+    # 对于给定的prompt，选择合适的PD节点
     async def select_p_d_node(
         self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams
     ) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
@@ -118,6 +118,7 @@ class HttpServerManagerForPDMaster:
         d_node = random.choice(self.decode_nodes)
         return p_node, d_node
 
+    # 请求的实际入口，得到请求后进行相应的处理
     # master负责协调整体的生成，用于生成token
     # 上层对token的获取就是通过master
     async def generate(
@@ -140,7 +141,7 @@ class HttpServerManagerForPDMaster:
             # 选择请求对应的PD节点进行生成
             p_node, d_node = await self.select_p_d_node(prompt, sampling_params, multimodal_params)
 
-            # 传入指定的PD节点，获取token的迭代生成流
+            # 得到PD节点后，开始进行实际的生成，返回token流
             results_generator = self._wait_to_token_package(
                 p_node,
                 d_node,
@@ -219,7 +220,7 @@ class HttpServerManagerForPDMaster:
         sampling_params.move_kv_to_decode_node.initialize(decode_node_dict if old_max_new_tokens != 1 else None)
         sampling_params.suggested_dp_index = -1
 
-        # 发送请求到 prefill 节点
+        # 将请求发送给 prefill 节点
         await p_node.websocket.send_bytes(pickle.dumps((ObjType.REQ, (prompt, sampling_params, multimodal_params))))
 
         # 等待并处理 prefill 节点的响应
@@ -244,11 +245,11 @@ class HttpServerManagerForPDMaster:
                     yield sub_req_id, request_output, metadata, finish_status
                 break
 
-        # 如果只需要一个输出 token，prefill 完就直接结束掉吧
+        # 如果只需要一个输出 token，prefill 完就直接结束即可，不需要进行decode
         if old_max_new_tokens == 1:
             return
 
-        # 等待 KV 缓存转移
+        # 等待 KV 缓存转移，如果超时则认为服务器繁忙
         try:
             await asyncio.wait_for(up_status_event.wait(), timeout=60)
         except asyncio.TimeoutError:
@@ -260,7 +261,7 @@ class HttpServerManagerForPDMaster:
         sampling_params.max_new_tokens = old_max_new_tokens - 1
         sampling_params.suggested_dp_index = up_status_event.upkv_status.dp_index
 
-        # 发送请求到 decode 节点
+        # 将请求发送给 decode 节点
         await d_node.websocket.send_bytes(pickle.dumps((ObjType.REQ, (prompt_ids, sampling_params, multimodal_params))))
 
         # 等待并处理 decode 节点的响应

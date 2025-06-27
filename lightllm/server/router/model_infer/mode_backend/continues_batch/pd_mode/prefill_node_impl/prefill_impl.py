@@ -72,7 +72,7 @@ class ChunckedPrefillForPrefillNode(ModeBackend):
 
         # 存在完成了prefill的请求，则不需要进一步的计算，创建KVMoveTask，并放入到任务队列中
         if ok_finished_reqs:
-            # 冻结完成了prefill的请求，并创建KVMoveTask，并放入到任务队列中
+            # 冻结完成了prefill的请求，并创建KVMoveTask，并放入到任务队列中，回收prefix cache
             self.prefill_req_frozen_tokens_and_put_to_kvmove_taskqueue(ok_finished_reqs)
             # 过滤完成了prefill的请求
             self._filter_reqs(ok_finished_reqs)
@@ -143,6 +143,7 @@ class ChunckedPrefillForPrefillNode(ModeBackend):
                     # 将下面的请求放入到任务队列中, 注意要使用raidx cache 返回的value
                     decode_node_info = DecodeNodeInfo(**req.shm_req.sample_params.move_kv_to_decode_node.to_dict())
                     # 完成计算后创建相应的KVMoveTask
+                    # 已经完成了prefix cache的合并，节省了原先的prefix cache的内存
                     task = KVMoveTask(
                         group_request_id=req.shm_req.group_req_id,
                         input_tokens=key.tolist(),
