@@ -108,11 +108,20 @@ class HttpServerManagerForPDMaster:
     async def select_p_d_node(
         self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams
     ) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
+        return self._randome_select_p_d_node(prompt, sampling_params, multimodal_params)
+
+    def _randome_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
         import random
 
         p_node = random.choice(self.prefill_nodes)
         d_node = random.choice(self.decode_nodes)
         return p_node, d_node
+
+    def _memory_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
+        pass
+
+    def _radix_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
+        pass
 
     async def generate(
         self,
