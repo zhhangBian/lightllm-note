@@ -11,6 +11,7 @@ def alloc_can_use_network_port(num=3, used_nccl_ports=None, from_port_num=10000)
     port_list = []
     for port in range(from_port_num, 65536):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            # 检查端口是否被占用
             result = s.connect_ex(("localhost", port))
             if result != 0 and port not in used_nccl_ports:
                 port_list.append(port)

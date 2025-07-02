@@ -59,6 +59,7 @@ from .build_prompt import build_prompt, init_tokenizer
 logger = init_logger(__name__)
 
 
+# 用于保存全局对象和状态
 @dataclass
 class G_Objs:
     app: FastAPI = None
@@ -66,9 +67,11 @@ class G_Objs:
     args: object = None
     g_generate_func: Callable = None
     g_generate_stream_func: Callable = None
+    # 可以是一般的server或pd_master的server
     httpserver_manager: Union[HttpServerManager, HttpServerManagerForPDMaster] = None
     shared_token_load: TokenLoad = None
 
+    # 根据启动参数创建相应的服务
     def set_args(self, args):
         self.args = args
         from .api_lightllm import lightllm_generate, lightllm_generate_stream
@@ -81,6 +84,7 @@ class G_Objs:
             self.g_generate_func = lightllm_generate
             self.g_generate_stream_func = lightllm_generate_stream
 
+        # 如果是pd_master，则启动一个特殊的httpserver manager
         if args.run_mode == "pd_master":
             self.metric_client = MetricClient(args.metric_port)
             # 对于pd_master而言启动一个特殊的httpserver manager
@@ -108,6 +112,7 @@ class G_Objs:
 
 g_objs = G_Objs()
 
+# 创建相应的HTTP服务
 app = FastAPI()
 g_objs.app = app
 
@@ -260,6 +265,7 @@ async def metrics() -> Response:
     return response
 
 
+# 创建相应的web socket服务
 @app.websocket("/pd_register")
 async def register_and_keep_alive(websocket: WebSocket):
     await websocket.accept()
@@ -323,6 +329,7 @@ async def shutdown():
     return
 
 
+# 启动时就会自动调用，不需要显式触发
 @app.on_event("startup")
 async def startup_event():
     logger.info("server start up")

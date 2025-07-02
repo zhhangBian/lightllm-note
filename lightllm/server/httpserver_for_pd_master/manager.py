@@ -52,6 +52,7 @@ class HttpServerManagerForPDMaster:
         self.per_token_costs = MovingAverage()
         return
 
+    # 注册PD节点，是节点发送相应的HTTP请求，再进行注册的
     async def register_pd(self, pd_info_json, websocket):
         pd_client = PD_Client_Obj(**pd_info_json)
         pd_client.websocket = websocket

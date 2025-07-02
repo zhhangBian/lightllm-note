@@ -344,6 +344,7 @@ def pd_master_start(args):
     logger.info(f"use tgi api: {args.use_tgi_api}")
     logger.info(f"all start args:{args}")
 
+    # 获取第一个可用的端口
     can_use_ports = alloc_can_use_network_port(num=1, used_nccl_ports=[args.nccl_port, args.port])
     metric_port = can_use_ports[0]
 
@@ -351,6 +352,7 @@ def pd_master_start(args):
 
     set_env_start_args(args)
 
+    # 进行性能指标收集的紫禁城
     process_manager.start_submodule_processes(
         start_funcs=[
             start_metric_manager,
@@ -358,6 +360,7 @@ def pd_master_start(args):
         start_args=[(metric_port, args)],
     )
 
+    # 启动HTTP服务器
     command = [
         "gunicorn",
         "--workers",
@@ -365,6 +368,7 @@ def pd_master_start(args):
         "--worker-class",
         "uvicorn.workers.UvicornWorker",
         "--bind",
+        # 绑定到指定的主机和端口
         f"{args.host}:{args.port}",
         "--log-level",
         "info",
@@ -380,6 +384,7 @@ def pd_master_start(args):
         f"{get_lightllm_gunicorn_keep_alive()}",
     ]
 
+    # 开始监听HTTP请求，后续进行请求节点的分发
     http_server_process = subprocess.Popen(command)
 
     if args.health_monitor:
