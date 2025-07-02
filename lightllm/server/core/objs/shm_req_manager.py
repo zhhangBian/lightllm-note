@@ -14,6 +14,7 @@ from lightllm.utils.envs_utils import get_env_start_args
 logger = init_logger(__name__)
 
 
+# 用于管理共享内存中的请求对象：有多个进程需要访存请求的信息，设置为了共享内存形式
 class ShmReqManager:
     def __init__(self):
         self.req_class: Req.__class__ = self.get_req_class_type()
@@ -38,6 +39,7 @@ class ShmReqManager:
         else:
             return ChunkedPrefillReq
 
+    # 获取最大请求数
     def get_max_req_num(self):
         args: StartArgs = get_env_start_args()
         return args.running_max_req_size
@@ -52,6 +54,7 @@ class ShmReqManager:
             self.reqs_shm = None
             self._init_reqs_shm()
 
+    # 获取共享内存空间
     def _init_reqs_shm(self):
         shm_name = f"{get_unique_server_name()}_req_shm_total"
         try:
@@ -63,6 +66,7 @@ class ShmReqManager:
         self.reqs_shm = shm
         return
 
+    # 使用申请到的共享内存空间初始化请求
     def init_to_req_objs(self):
         self.reqs: List[Req] = (self.req_class * self.max_req_num).from_buffer(self.reqs_shm.buf)
         for i in range(self.max_req_num):
@@ -70,6 +74,7 @@ class ShmReqManager:
             self.reqs[i].index_in_shm_mem = i
         return
 
+    # 创建共享内存空间的原子锁
     def init_to_req_locks(self):
         array_lock_name = f"{get_unique_server_name()}_array_reqs_lock"
         self.reqs_lock = AtomicShmArrayLock(array_lock_name, self.max_req_num)
@@ -78,15 +83,19 @@ class ShmReqManager:
     def get_req_lock_by_index(self, req_index_in_mem: int) -> AtomicLockItem:
         return self.reqs_lock.get_lock_context(req_index_in_mem)
 
+    # 创建管理请求的锁
     def init_manager_lock(self):
         lock_name = f"{get_unique_server_name()}_shm_reqs_manager_lock"
         self.manager_lock = AtomicShmLock(lock_name)
         return
 
+    # 初始化请求的分配状态
     def init_alloc_state_shm(self):
         shm_name = f"{get_unique_server_name()}_req_alloc_states"
         req_link_list_name = f"{get_unique_server_name()}_req_linked_states"
+        # 创建一个请求的链表管理器，用于管理请求的分配和释放
         self.linked_req_manager = ReqLinkedListManager(req_link_list_name, self.max_req_num)
+        # 创建一个请求的分配状态数组，用于管理请求的分配和释放
         self.alloc_state_shm = ShmArray(shm_name, (self.max_req_num,), np.int32)
         self.alloc_state_shm.create_shm()
         self.alloc_state_shm.arr[:] = 0
@@ -108,6 +117,7 @@ class ShmReqManager:
     async def async_alloc_req_index(self):
         return self.alloc_req_index()
 
+    # 释放请求的索引
     def release_req_index(self, req_index_in_mem):
         assert req_index_in_mem < self.max_req_num
         with self.manager_lock:
@@ -119,11 +129,13 @@ class ShmReqManager:
             logger.info("all shm req has been release ok")
         return
 
+    # 异步释放请求的索引
     async def async_release_req_index(self, req_index_in_mem):
         return self.release_req_index(req_index_in_mem)
 
     # get_req_obj_by_index 和 put_back_req_obj 是 分配好后，进行对象获取和
     # 管理的接口，主要是要进行引用计数的管理。
+    # 根据index，获取相应位置的请求
     def get_req_obj_by_index(self, req_index_in_mem):
         assert req_index_in_mem < self.max_req_num
         assert self.proc_private_get_state[req_index_in_mem] == 0
@@ -133,9 +145,11 @@ class ShmReqManager:
         self.proc_private_get_state[req_index_in_mem] = 1
         return ans
 
+    # 异步获取请求对象
     async def async_get_req_obj_by_index(self, req_index_in_mem):
         return self.get_req_obj_by_index(req_index_in_mem)
 
+    # 将请求对象放回共享内存
     def put_back_req_obj(self, req: Req):
         req_index_in_mem = req.index_in_shm_mem
         assert req_index_in_mem < self.max_req_num
@@ -144,6 +158,7 @@ class ShmReqManager:
             req.ref_count = req.ref_count - 1
         self.proc_private_get_state[req_index_in_mem] = 0
 
+    # 异步将请求对象放回共享内存
     async def async_put_back_req_obj(self, req: Req):
         return self.put_back_req_obj(req)
 
@@ -151,6 +166,7 @@ class ShmReqManager:
         self.reqs = None
 
 
+# 用于管理请求的链表
 class ReqLinkedListManager:
     NEXT_INDEX = 0  # 仅保留指向下一个可用索引的指针
 

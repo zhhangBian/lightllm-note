@@ -81,6 +81,7 @@ class HttpServerManagerForPDMaster:
         logger.info(f"mode: {pd_client.mode} url: {pd_client.client_ip_port} removed")
         return
 
+    # 通过传输的消息数据，更新请求的状态
     async def update_req_status(self, upkv_status: UpKVStatus):
         try:
             group_request_id = convert_sub_id_to_group_id(upkv_status.group_request_id)
@@ -252,6 +253,7 @@ class HttpServerManagerForPDMaster:
 
         # 等待 KV 缓存转移，如果超时则认为服务器繁忙
         try:
+            # 等待KV缓存转移完成
             await asyncio.wait_for(up_status_event.wait(), timeout=60)
         except asyncio.TimeoutError:
             logger.warning(f"group_request_id: {group_request_id} kv move time out err, server is busy now.")

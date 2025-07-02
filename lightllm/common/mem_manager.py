@@ -16,6 +16,7 @@ from lightllm.utils.dist_utils import get_current_device_id
 logger = init_logger(__name__)
 
 
+# 用于管理全局的kv缓存
 class MemoryManager:
     def __init__(self, size, dtype, head_num, head_dim, layer_num, always_copy=False, mem_fraction=0.9):
         self.size = size
@@ -56,6 +57,7 @@ class MemoryManager:
     def get_cell_size(self):
         return 2 * self.head_num * self.head_dim * self.layer_num * torch._utils._element_size(self.dtype)
 
+    # 试探内存空间
     def profile_size(self, mem_fraction):
         if self.size is not None:
             return
@@ -76,13 +78,16 @@ class MemoryManager:
         )
         return
 
+    # 初始化kv缓存
     def _init_buffers(self, size, dtype, head_num, head_dim, layer_num):
         # 在初始化 kv_buffer 的时候，每层多初始化了一个 token，这个 token 永远不会被真的被对外
         # 分配，内部实际也没有管理，这个token是预留来对一些特殊的运行模式，如多dp下，overlap microbatch
         # 等模式下 padding 一些请求，使推理过程可以正常运行采用的，其索引值为size，存储在HOLD_TOKEN_MEMINDEX
         # 成员变量中，其与 req_manager 中的HOLD_REQUEST_ID具有类似的作用和意义。
+        # 一次申请足够大量的KVC
         self.kv_buffer = torch.empty((layer_num, size + 1, 2 * head_num, head_dim), dtype=dtype, device="cuda")
 
+    # 初始化一个用于kv缓存转移的buffer
     def alloc_kv_move_buffer(self, max_req_total_len):
         """
         pd 分离模式使用的特殊接口
@@ -96,9 +101,11 @@ class MemoryManager:
         self.token_dim_size = self.kv_move_buffer.shape[-2] * self.kv_move_buffer.shape[-1]
         return
 
+    # 将kv缓存发送给decode节点
     def send_to_decode_node(
         self,
         move_tasks: List[KVMoveTask],
+        # 在不同设备上所有的mem_manager
         mem_managers: List["MemoryManager"],
         dp_size_in_node: int,
         nccl_comm: PyNcclCommunicator,
@@ -107,6 +114,7 @@ class MemoryManager:
 
         # 先将数据发送到指定的一张卡上的buffer，再发送。
 
+        # 需要搬运的token的地址指针列表
         move_token_indexes = []
         for task in move_tasks:
             if task.move_kv_len != 0:
@@ -114,28 +122,39 @@ class MemoryManager:
 
         cur_device_index = self.kv_buffer.get_device()
         cur_mem = mem_managers[cur_device_index]
+        # 遍历所有的mem_managers，将数据发送给decode节点
         for i, mem in enumerate(mem_managers):
             for layer_index in range(mem.layer_num):
+                # 获取需要搬运的kv缓存数据
                 move_buffer = mem._get_kv_move_data(move_token_indexes, layer_index)
+                # 当当前循环的设备索引与目标设备相同时，直接通过NCCL发送move_buffer到设备1
                 if i == cur_device_index:
                     nccl_comm.send(move_buffer, dst=1)
+                # 当前循环的设备索引与目标设备不同，需要将数据广播到所有的设备上
                 else:
+                    # 缓冲区总元素数量
                     move_size = move_buffer.numel()
+                    # 创建一个新的缓冲区，用于广播数据
                     new_move_buffer = cur_mem.kv_move_buffer.view(-1)[0:move_size].view(move_buffer.shape)
                     from torch.cuda import comm
-
+                    # 广播数据到所有的设备上
                     comm.broadcast(move_buffer, out=[new_move_buffer])
                     nccl_comm.send(new_move_buffer, dst=1)
         return
 
+    # 获取需要搬运的kv缓存数据
     def _get_kv_move_data(self, token_indexes: List[int], layer_index: int):
+        # 乘以相应的维度,获取真正需要搬运的大小
         move_size = self.token_dim_size * len(token_indexes)
+        # 将kv_move_buffer转换为1维，然后取出需要搬运的kv缓存数据
         move_buffer = self.kv_move_buffer.view(-1)[0:move_size].view(
             1, len(token_indexes), 2 * self.head_num, self.head_dim
         )
+        # 将kv_buffer中的数据复制到move_buffer中
         move_buffer[:, :, :, :] = self.kv_buffer[layer_index, token_indexes, :, :]
         return move_buffer
 
+    # 从prefill节点接收kv缓存
     def receive_from_prefill_node(
         self,
         move_tasks: List[KVMoveTask],
@@ -147,6 +166,7 @@ class MemoryManager:
 
         # 先将数据接受到指定的一张卡上的buffer，再复制到其他的卡上。
 
+        # 需要接收的token指针的列表
         move_token_indexes = []
         for task in move_tasks:
             if task.move_kv_len != 0:
@@ -169,10 +189,12 @@ class MemoryManager:
                     mem._write_kv_move_data(move_token_indexes, new_recive_buffer, layer_index)
         return
 
+    # 直接将接收到的kv缓存数据写入到kv_buffer中
     def _write_kv_move_data(self, token_indexes: torch.Tensor, buffer_tensor: torch.Tensor, layer_index):
         self.kv_buffer[layer_index : layer_index + 1, token_indexes, :, :] = buffer_tensor
         return
 
+    # 使用p2p triton kernel 进行数据复制和传输的实现方式
     def send_to_decode_node_p2p(
         self,
         move_tasks: List[KVMoveTask],
@@ -203,11 +225,13 @@ class MemoryManager:
         move_token_num = len(token_indexes)
         move_size = self.token_dim_size * move_token_num
         move_buffer = kv_move_buffer.view(-1)[0:move_size].view(move_token_num, 2 * self.head_num, self.head_dim)
+        # 利用triton实现的算子进行数据搬运
         kv_trans(
             self.kv_buffer[layer_index, :, :, :], token_indexes, move_buffer, self.kv_move_buf_indexes[0:move_token_num]
         )
         return move_buffer
 
+    # 使用p2p triton kernel 进行数据复制和传输的实现方式
     def receive_from_prefill_node_p2p(
         self,
         move_tasks: List[KVMoveTask],
@@ -243,6 +267,7 @@ class MemoryManager:
     def _free_buffers(self):
         self.kv_buffer = None
 
+    # 分配内存
     def alloc(self, need_size) -> torch.Tensor:
         if need_size > self.mark_end - self.mark_start:
             logger.error(f"warn no enough cache need_size {need_size} left_size {self.can_use_mem_size}")
@@ -257,6 +282,7 @@ class MemoryManager:
         self.shared_can_use_token_num.set_value(self.can_use_mem_size)
         return ans
 
+    # 释放内存
     def free(self, free_index: Union[torch.Tensor, List[int]]):
         """_summary_
 

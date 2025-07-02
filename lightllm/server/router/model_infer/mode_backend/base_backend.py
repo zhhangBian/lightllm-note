@@ -166,6 +166,8 @@ class ModeBackend:
         return
 
     # 一些可以复用的通用功能函数
+    # 进行请求的初始化
+    # init_req_obj 参数用于控制是否对请求对象的进行全量初始化
     def _init_reqs(self, reqs: List[Tuple], init_req_obj=True):
         """
         init_req_obj 参数用于控制是否对请求对象的进行全量初始化，如果设置为True

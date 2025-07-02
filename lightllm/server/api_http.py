@@ -304,6 +304,7 @@ async def kv_move_status(websocket: WebSocket):
             json_data = json.loads(data)
             from .pd_io_struct import UpKVStatus
 
+            # 代表相应的传输数据
             upkv_status = UpKVStatus(**json_data)
             await g_objs.httpserver_manager.update_req_status(upkv_status)
     except (WebSocketDisconnect, Exception, RuntimeError) as e:

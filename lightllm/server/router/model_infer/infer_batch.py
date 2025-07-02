@@ -22,11 +22,14 @@ from lightllm.utils.envs_utils import get_env_start_args
 logger = init_logger(__name__)
 
 
+# 全局的推理锁，用于接收请求，加入相应的调度器中
 @dataclass
 class InferenceContext:
     req_manager: ReqManager = None  # gpu 请求管理
+    # 管理全局的radix cache
     radix_cache: RadixCache = None
     shm_req_manager: ShmReqManager = None  # 共享内存请求对象管理
+    # 用于标记当前正在运行的请求
     requests_mapping: Dict[int, "InferReq"] = None
     group_mapping = None  # 只有进行多输出模式下才有真的使用
     infer_req_ids = None
@@ -34,6 +37,7 @@ class InferenceContext:
 
     overlap_stream: torch.cuda.Stream = None  # 一些情况下推理进程进行异步折叠操作的异步流对象。
 
+    # 将全局上下文初始化
     def register(
         self, req_manager: ReqManager, radix_cache: RadixCache, shm_req_manager: ShmReqManager, vocab_size: int
     ):
@@ -48,16 +52,19 @@ class InferenceContext:
         self.vocab_size = vocab_size
         return
 
+    # 获取全局的异步流对象
     def get_overlap_stream(self) -> torch.cuda.Stream:
         if self.overlap_stream is None:
             self.overlap_stream = torch.cuda.Stream()
         return self.overlap_stream
 
+    # 将请求添加到全局的推理上下文中
     def add_reqs(self, requests: List[Tuple[int, int, Any, int]], init_req_obj=True):
         request_ids = []
         for r in requests:
 
             r_id, r_index, multimodal_params, _ = r
+            # 将静态的请求内容转变为动态的请求推理结构，用于管理请求的推理
             if r_id not in self.requests_mapping.keys():
                 r_obj = InferReq(
                     req_id=r_id,
@@ -80,7 +87,9 @@ class InferenceContext:
 
         return
 
+    # 释放一个请求的内存
     def free_a_req_mem(self, free_token_index: List, req: "InferReq", is_group_finished: bool):
+        # 没有prefix cache，直接释放指针对应的内存地址
         if self.radix_cache is None:
             if is_group_finished:
                 free_token_index.append(self.req_manager.req_to_token_indexs[req.req_idx][0 : req.cur_kv_len])
@@ -88,6 +97,7 @@ class InferenceContext:
                 free_token_index.append(
                     self.req_manager.req_to_token_indexs[req.req_idx][req.shm_req.input_len : req.cur_kv_len]
                 )
+        # 有prefix cache，需要进行缓存共享
         else:
             input_token_ids = req.get_input_token_ids()
             key = torch.tensor(input_token_ids[0 : req.cur_kv_len], dtype=torch.int64, device="cpu")
@@ -110,6 +120,7 @@ class InferenceContext:
                     self.radix_cache.dec_node_ref_counter(req.shared_kv_node)
                     req.shared_kv_node = None
 
+    # 保存非量化的缓存prompt cache资源，是定制场景使用的接口，当前代码中不会有调用。
     def _save_promptcache_kvbuffer(self):
         """
         save prompt cache kv buffer
@@ -124,6 +135,7 @@ class InferenceContext:
         prompt_cache_kv_buffer = self.radix_cache.mem_manager.get_index_kv_buffer(index)
         torch.save(prompt_cache_kv_buffer, f"prompt_cache_rank_{dist.get_rank()}.pt")
 
+    # 将完成的请求进行释放，同时释放相应的内存地址
     @torch.no_grad()
     def filter(self, finished_request_ids: List[int]):
         if len(finished_request_ids) == 0:
@@ -163,11 +175,13 @@ class InferenceContext:
 
         return
 
+    # 将完成的请求进行释放，同时释放相应的内存地址
     def filter_reqs(self, finished_reqs: List["InferReq"]):
         if finished_reqs:
             self.filter([req.req_id for req in finished_reqs])
         return
 
+    # 暂停请求：停止运行，但是不需要释放已经生成的token
     @torch.no_grad()
     def pause_reqs(self, pause_req_ids: List[int]):
         free_token_index = []
@@ -191,6 +205,7 @@ class InferenceContext:
         return self
 
 
+# 在全局初始化时创建一个上下文锁
 g_infer_context = InferenceContext()
 
 
@@ -242,6 +257,7 @@ class InferSamplingParams:
         )
 
 
+# 请求推理中的动态表示，管理运动中的状态
 class InferReq:
     def __init__(
         self,
@@ -253,6 +269,7 @@ class InferReq:
     ):
         self.req_id = req_id
         self.req_idx = req_idx
+        # shm代表了多个进程可以共享访问
         self.shm_index = shm_index
         self.multimodal_params = multimodal_params
         self.vocab_size = vocab_size
@@ -269,8 +286,11 @@ class InferReq:
 
     def init_all(self):
         if self.initialized is False:
+            # 获取相应的共享内存对象
             self.shm_req = g_infer_context.shm_req_manager.get_req_obj_by_index(self.shm_index)
+            # 将共享内存中的prompt_ids数组链接到当前的请求对象中
             self.shm_req.link_prompt_ids_shm_array()
+            # 将共享内存中的logprobs数组链接到当前的请求对象中
             self.shm_req.link_logprobs_shm_array()
             self.sampling_param: InferSamplingParams = InferSamplingParams(self.shm_req, self.vocab_size)
 

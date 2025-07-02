@@ -11,6 +11,7 @@ from lightllm.utils.envs_utils import get_env_start_args
 from typing import List, Any, Union
 
 
+# 用于管理请求的完成状态
 class FinishStatus(ctypes.Structure):
     _pack_ = 4
     _fields_ = [("status", ctypes.c_int)]
@@ -40,6 +41,7 @@ class FinishStatus(ctypes.Structure):
         return None
 
 
+# 用于管理请求的prefix token ids
 class PrefixTokenIdsStruct(ctypes.Structure):
     _pack_ = 4
     _fields_ = [("size", ctypes.c_int), ("data", ctypes.c_int64 * 10)]
@@ -55,6 +57,7 @@ class PrefixTokenIdsStruct(ctypes.Structure):
         return list(self.data[: self.size])
 
 
+# 用于管理请求的共享内存对象
 class Req(ctypes.Structure):
     _pack_ = 4
     _fields_ = [
@@ -158,6 +161,7 @@ class Req(ctypes.Structure):
         # 子类继承进行一些额外的初始化操作
         pass
 
+    # 创建共享内存中的prompt_ids数组
     def create_prompt_ids_shm_array(self):
         service_uni_name = get_unique_server_name()
         name = f"{service_uni_name}_shm_prompts_{self.index_in_shm_mem}"
@@ -165,6 +169,7 @@ class Req(ctypes.Structure):
         self.shm_prompt_ids.create_shm()
         return
 
+    # 将共享内存中的prompt_ids数组链接到当前的请求对象中
     def link_prompt_ids_shm_array(self):
         service_uni_name = get_unique_server_name()
         name = f"{service_uni_name}_shm_prompts_{self.index_in_shm_mem}"
@@ -172,6 +177,7 @@ class Req(ctypes.Structure):
         self.shm_prompt_ids.link_shm()
         return
 
+    # 创建共享内存中的logprobs数组
     def create_logprobs_shm_array(self):
         service_uni_name = get_unique_server_name()
         name = f"{service_uni_name}_shm_logprobs_{self.index_in_shm_mem}"
@@ -179,6 +185,7 @@ class Req(ctypes.Structure):
         self.shm_logprobs.create_shm()
         return
 
+    # 将共享内存中的logprobs数组链接到当前的请求对象中
     def link_logprobs_shm_array(self):
         service_uni_name = get_unique_server_name()
         name = f"{service_uni_name}_shm_logprobs_{self.index_in_shm_mem}"
@@ -186,9 +193,11 @@ class Req(ctypes.Structure):
         self.shm_logprobs.link_shm()
         return
 
+    # 获取prompt_ids
     def get_prompt_ids(self):
         return self.shm_prompt_ids.arr[: self.input_len].tolist()
 
+    # 将请求对象转换为router的rpc对象
     def to_router_rpc_obj(self):
         if hasattr(self, "multimodal_params"):
             return (
@@ -200,6 +209,7 @@ class Req(ctypes.Structure):
         else:
             return (self.request_id, self.index_in_shm_mem, None, self.sample_params.suggested_dp_index)
 
+    # 判断请求对象是否可以被释放
     def can_release(self):
         # 只有管理节点有一个引用
         ref_count_ok = self.ref_count == 1
@@ -213,18 +223,26 @@ class Req(ctypes.Structure):
 
         return False
 
+    # 获取请求对象已经使用的token数量
     def get_used_tokens(self):
         return max(0, self.shm_cur_kv_len)
 
+    # 获取请求对象的token数量
+    # 返回一个元组 (a_len, b_len)
+    # a_len: 当前已经使用的token数量
+    # b_len: 未来额外需要的token数量
     def get_tuple_tokens(self, is_busy, router_max_new_token_len):
         raise NotImplementedError("Subclasses should implement this method")
 
+    # 获取请求对象的decode需要的token数量
     def get_decode_need_tokens(self):
         raise NotImplementedError("Subclasses should implement this method")
 
+    # 获取请求对象的第一个router需要的token数量
     def get_first_router_need_tokens(self):
         raise NotImplementedError("Subclasses should implement this method")
 
+    # 获取请求对象的所有prompt的metadata
     def get_all_prompt_metadata(self):
         """
         return_all_prompt_logprobs mode use to return all logprobs cacul ppl
@@ -251,6 +269,7 @@ ADDED_OUTPUT_LEN = 6
 class NormalReq(Req):
     _pack_ = 4
 
+    # 获取请求对象的token数量
     def get_tuple_tokens(self, is_busy, router_max_new_token_len):
         has_out_len = self.shm_cur_output_len
         if self.sample_params.ignore_eos:
@@ -264,7 +283,9 @@ class NormalReq(Req):
                 self.sample_params.max_new_tokens, max(int(1.1 * has_out_len), router_max_new_token_len)
             )
 
+        # 当前已经使用的token数量 = 当前输入长度 + 已经输出的长度 + 1
         a_len = max(self.input_len + has_out_len + 1, self.shm_cur_kv_len + 1)
+        # 未来还需要的 = 当前最大输出长度 - 已经输出的长度 - 1 + 额外增加的输出长度
         b_len = max(0, cur_max_new_token_len - has_out_len - 1) + ADDED_OUTPUT_LEN
 
         return (a_len, b_len)
@@ -278,9 +299,11 @@ class NormalReq(Req):
         return self.input_len + self.shm_cur_output_len
 
 
+# 将长文本进行分块处理，而不是一次性处理
 class ChunkedPrefillReq(Req):
     _pack_ = 4
 
+    # 获取计算所需的token数量
     def get_tuple_tokens(self, is_busy, router_max_new_token_len):
         args = get_env_start_args()
         max_waiting_token = args.router_max_wait_tokens
@@ -294,7 +317,9 @@ class ChunkedPrefillReq(Req):
                 self.sample_params.max_new_tokens, max(int(1.1 * has_out_len), router_max_new_token_len)
             )
 
+        # 当前已经使用的token数量 = 当前输入长度 + 已经输出的长度 + 1
         a_len = max(self.input_len + has_out_len + 1, self.shm_cur_kv_len + 1)
+        # 未来还需要的 = (当前最大输出长度 - 已经输出的长度 - 1 + 额外增加的输出长度) / 分块大小 * 每个块的大小（会有内碎片） + 当前最大输出长度 - 已经输出的长度 - 1
         b_len = (
             (self.input_len + has_out_len - self.shm_cur_kv_len + self.chunked_prefill_size - 1)
             // self.chunked_prefill_size
@@ -307,6 +332,7 @@ class ChunkedPrefillReq(Req):
 
         return (a_len, b_len)
 
+    # 获取计算所需的token数量
     def get_decode_need_tokens(self):
         """
         chunkedprefill 调度模式的实现

@@ -69,6 +69,7 @@ class PD_Master_Obj:
         return f"PD_MASTER host_ip_port: {self.host_ip_port} node_id: {self.node_id}"
 
 
+# 用于代表KV缓存转移的状态
 @dataclass
 class UpKVStatus:
     type: str = "kv_move_status"

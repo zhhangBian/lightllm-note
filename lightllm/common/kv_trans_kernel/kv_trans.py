@@ -3,6 +3,8 @@ import torch
 import triton
 import triton.language as tl
 
+# triton实现的数据搬运算子
+
 
 @triton.jit
 def _kv_trans_kernel(

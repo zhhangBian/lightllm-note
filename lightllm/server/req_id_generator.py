@@ -64,5 +64,6 @@ class ReqIDGenerator:
         return id
 
 
+# 将子请求id转换为组请求id
 def convert_sub_id_to_group_id(sub_req_id):
     return (sub_req_id // MAX_BEST_OF) * MAX_BEST_OF

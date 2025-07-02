@@ -6,6 +6,7 @@ from lightllm.utils.log_utils import init_logger
 logger = init_logger(__name__)
 
 
+# 用于管理共享内存中的请求对象：有多个进程需要访存请求的信息，设置为了共享内存形式
 class AtomicShmArrayLock:
     def __init__(self, lock_name: str, lock_num: int):
         self.lock_name = lock_name
