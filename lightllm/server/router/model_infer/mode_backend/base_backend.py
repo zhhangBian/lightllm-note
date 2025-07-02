@@ -187,6 +187,8 @@ class ModeBackend:
         return req_ids
 
     # 一些可以复用的通用功能函数
+    # 将传入的请求分为五类：未初始化请求、中止请求、已完成请求、需要prefill的请求和需要decode的请求
+    # 获取这些分类的请求
     def _get_classed_reqs(self, req_ids: List[int], no_decode: bool = False, strict_prefill: bool = False):
         """
         当将参数 no_decode 设置为True后，返回的 decode_reqs 永远为空list，主要是
@@ -250,6 +252,7 @@ class ModeBackend:
         return uinit_reqs, aborted_reqs, ok_finished_reqs, prefill_reqs, decode_reqs
 
     # 一些可以复用的通用功能函数
+    # 进行请求的后处理操作
     def _post_handle(
         self,
         run_reqs: List[InferReq],
@@ -274,6 +277,7 @@ class ModeBackend:
             else:
                 new_kv_len = req_obj.get_cur_total_len()
 
+            # 更新请求的 kv 长度
             req_obj.cur_kv_len = new_kv_len
             if self.is_master_in_dp:
                 shm_req.shm_cur_kv_len = req_obj.cur_kv_len
@@ -335,22 +339,30 @@ class ModeBackend:
         return finished_req_ids
 
     # 一些可以复用的通用功能函数
+    # 对请求进行初始化和过滤
+    # uninit_reqs: 未初始化的请求列表
+    # ok_finished_reqs: 已完成的请求列表
+    # clear_list: 是否在处理后清空这些列表
     def _overlap_req_init_and_filter(
         self, uninit_reqs: List[InferReq], ok_finished_reqs: List[InferReq], clear_list=False
     ):
         if uninit_reqs or ok_finished_reqs:
             # 利用推理的时间，延迟折叠下一个请求的初始化和退出操作
+            # torch.cuda.current_stream()是当前流，g_infer_context.get_overlap_stream()是重叠流
             with torch.cuda.stream(g_infer_context.get_overlap_stream()):
+                # 处理已完成的请求
                 if ok_finished_reqs:
                     g_infer_state_lock.acquire()
                     g_infer_context.filter_reqs(ok_finished_reqs)
                     g_infer_state_lock.release()
 
+                # 对未初始化的请求进行初始化
                 if uninit_reqs:
                     g_infer_state_lock.acquire()
                     self._post_init_reqs(uninit_reqs)
                     g_infer_state_lock.release()
 
+            # 同步主流与重叠流
             torch.cuda.current_stream().wait_stream(g_infer_context.get_overlap_stream())
 
             if clear_list:
@@ -360,6 +372,7 @@ class ModeBackend:
         return
 
     # 一些可以复用的通用功能函数
+    # 对未初始化的请求进行初始化
     def _post_init_reqs(self, uninit_reqs: List[InferReq]):
         """
         如req对象在调用 _init_reqs 函数时， init_req_obj 为 False，则在适当的时机调用
@@ -370,6 +383,7 @@ class ModeBackend:
         return
 
     # 一些可以复用的通用功能函数
+    # 对请求进行过滤
     def _filter_reqs(self, reqs: List[InferReq]):
         if reqs:
             g_infer_state_lock.acquire()

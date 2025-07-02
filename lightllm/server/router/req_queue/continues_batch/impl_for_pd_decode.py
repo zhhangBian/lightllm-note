@@ -23,6 +23,7 @@ class QueueForPDDecode(BaseQueue):
             self.cache_len_list = []
         return
 
+    # 生成新的batch
     # @calculate_time(show=True, min_cost_ms=10)
     def generate_new_batch(self, current_batch: Batch, limit_router_queue_length: int = None):
         # 如果当前已经被调度的请求数量超过了上限，直接不调度新的请求了。

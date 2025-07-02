@@ -55,6 +55,7 @@ class InferenceContext:
     # 获取全局的异步流对象
     def get_overlap_stream(self) -> torch.cuda.Stream:
         if self.overlap_stream is None:
+            # 创建一个计算流，用于进行异步操作
             self.overlap_stream = torch.cuda.Stream()
         return self.overlap_stream
 
@@ -338,19 +339,23 @@ class InferReq:
     def get_cur_total_len(self):
         return self.shm_req.input_len + self.cur_output_len
 
+    # 获取请求对象的输入token ids
     def get_input_token_ids(self):
         return self.shm_req.shm_prompt_ids.arr[0 : self.get_cur_total_len()]
 
+    # chunked方式下输入的token ids
     def get_chuncked_input_token_ids(self):
         chunked_start = self.cur_kv_len
         chunked_end = min(self.get_cur_total_len(), chunked_start + self.shm_req.chunked_prefill_size)
         return self.shm_req.shm_prompt_ids.arr[0:chunked_end]
 
+    # chunked方式下输入的token数量
     def get_chuncked_input_token_len(self):
         chunked_start = self.cur_kv_len
         chunked_end = min(self.get_cur_total_len(), chunked_start + self.shm_req.chunked_prefill_size)
         return chunked_end
 
+    # 设置下一个生成的token id
     def set_next_gen_token_id(self, next_token_id: int, logprob: float):
         index = self.get_cur_total_len()
         self.shm_req.shm_prompt_ids.arr[index] = next_token_id
