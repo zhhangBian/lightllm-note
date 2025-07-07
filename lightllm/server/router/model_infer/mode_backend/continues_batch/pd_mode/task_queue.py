@@ -4,11 +4,14 @@ from lightllm.utils.log_utils import init_logger
 logger = init_logger(__name__)
 
 
+# 由于PD分离的多进程特性，需要支持相应的锁进行调度
 class TaskQueue:
     def __init__(self, get_func, fail_func):
+        # 使用多线程的锁，避免多进程之间竞争
         self.lock = threading.Lock()
         self.datas = []
         self.get_func = get_func
+        # 失败之后相应的回调函数
         self.fail_func = fail_func
         self.has_error = False
 

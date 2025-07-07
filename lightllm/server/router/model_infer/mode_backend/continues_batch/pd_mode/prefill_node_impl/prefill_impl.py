@@ -156,6 +156,7 @@ class ChunckedPrefillForPrefillNode(ModeBackend):
                         decode_dp_index=None,
                         mark_start_time=time.time(),
                     )
+                    # 全局的传输任务的缓存
                     g_kv_move_task_cache[task.group_request_id] = (task, share_node)
 
                     # 注意兼容纯 tp 和 tp dp 混合模式的逻辑

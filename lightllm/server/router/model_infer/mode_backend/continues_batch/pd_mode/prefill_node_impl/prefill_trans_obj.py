@@ -41,6 +41,7 @@ class KVTransConnectObj:
     # 构建传输通信对象
     # ==================================================================================
 
+    # 因为像连接的建立不是立即的，而是需要在对象创建一段时间后，才能建立连接，所以需要一个create方法
     def create(
         self, decode_node_id: int, decode_node_ip: str, decode_node_rpyc_port: int, manager: "PrefillKVMoveManager"
     ):
@@ -54,6 +55,7 @@ class KVTransConnectObj:
         self.manager = manager
         self.timer_checker = TimeChecker(6)
 
+        # 建立rpyc连接
         con = rpyc.connect(
             host=decode_node_ip,
             port=decode_node_rpyc_port,
@@ -202,9 +204,11 @@ class KVTransConnectObj:
             )
             move_tasks.clear()
 
+    # 负责进行kv传输的线程loop
     def kv_trans_handle_loop(self):
         func_name = self.kv_trans_handle_loop.__name__
         while not self.has_error:
+            # 从队列中获取kv传输任务
             move_tasks: List[List[KVMoveTask]] = self.ready_kv_trans_task_queue.get_tasks(
                 log_tag="ready_kv_trans_task_queue"
             )

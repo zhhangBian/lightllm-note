@@ -215,6 +215,7 @@ class PrefillKVMoveManager:
         gc.collect()
         from .prefill_trans_obj import KVTransConnectObj
 
+        # 创建新的连接对象
         trans_obj = KVTransConnectObj()
         trans_obj.create(task.decode_node.node_id, task.decode_node.ip, task.decode_node.rpyc_port, self)
         self.connect_id_to_trans_obj[trans_obj.connect_id] = trans_obj
