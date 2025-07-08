@@ -87,6 +87,7 @@ class HttpServerManagerForPDMaster:
             group_request_id = convert_sub_id_to_group_id(upkv_status.group_request_id)
             up_status_event = self.req_id_to_out_inf[group_request_id].up_status_event
             up_status_event.upkv_status = upkv_status
+            # 进行唤醒操作，等待请求更新的进程可以继续执行
             up_status_event.set()
         except:
             pass
@@ -223,6 +224,7 @@ class HttpServerManagerForPDMaster:
         sampling_params.suggested_dp_index = -1
 
         # 将请求发送给 prefill 节点
+        # 发送请求，代表了进行相应的KVC移动
         await p_node.websocket.send_bytes(pickle.dumps((ObjType.REQ, (prompt, sampling_params, multimodal_params))))
 
         # 等待并处理 prefill 节点的响应
@@ -253,7 +255,7 @@ class HttpServerManagerForPDMaster:
 
         # 等待 KV 缓存转移，如果超时则认为服务器繁忙
         try:
-            # 等待KV缓存转移完成
+            # 等待KV缓存转移完成：通过event的状态更新完成
             await asyncio.wait_for(up_status_event.wait(), timeout=60)
         except asyncio.TimeoutError:
             logger.warning(f"group_request_id: {group_request_id} kv move time out err, server is busy now.")
@@ -262,6 +264,7 @@ class HttpServerManagerForPDMaster:
         # 修改采样参数，准备发送请求到 decode 节点
         sampling_params.move_kv_to_decode_node.initialize(None)
         sampling_params.max_new_tokens = old_max_new_tokens - 1
+        # 获取KVC转移后由event通知的信息
         sampling_params.suggested_dp_index = up_status_event.upkv_status.dp_index
 
         # 将请求发送给 decode 节点

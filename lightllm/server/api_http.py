@@ -306,6 +306,7 @@ async def kv_move_status(websocket: WebSocket):
 
             # 代表相应的传输数据
             upkv_status = UpKVStatus(**json_data)
+            # 传输后需要更新相应的状态
             await g_objs.httpserver_manager.update_req_status(upkv_status)
     except (WebSocketDisconnect, Exception, RuntimeError) as e:
         logger.error(f"kv_move_status client {(client_ip, client_port)} has error {str(e)}")

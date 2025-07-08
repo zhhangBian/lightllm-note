@@ -235,7 +235,7 @@ class PrefillKVMoveManager:
             gc.collect()
         return
 
-
+# 初始化prefill节点的KVC搬运进程
 def _init_env(args, info_queue: mp.Queue, mem_queues: List[mp.Queue], event: mp.Event):
     import lightllm.utils.rpyc_fix_utils as _
 

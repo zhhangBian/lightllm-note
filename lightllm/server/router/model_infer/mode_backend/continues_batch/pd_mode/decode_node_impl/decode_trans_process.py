@@ -17,6 +17,7 @@ from lightllm.distributed.pynccl import PyNcclCommunicator, StatelessP2PProcessG
 logger = init_logger(__name__)
 
 
+# 处理KVMoveTaskGroup任务
 def _handle_kvmove_task(
     move_tasks: List[KVMoveTask],
     task_out_queue: mp.Queue,
@@ -25,22 +26,28 @@ def _handle_kvmove_task(
     connect_id: str,
     dp_size_in_node: int,
 ):
+    # 计算需要搬运的kv长度
     total_move_kv_len = sum([task.move_kv_len for task in move_tasks])
     try:
+        # 获取当前设备索引
         device_index = connect_id_to_comm[connect_id].device.index
         start = time.time()
         if total_move_kv_len != 0:
+            # 获取当前设备对应的mem manager
             cur_mem = mem_managers[device_index]
             logger.info(f"trans start: {move_tasks[0].to_decode_log_info()}")
+            # 使用p2p模式搬运KVC
             if kv_trans_use_p2p():
                 cur_mem.receive_from_prefill_node_p2p(
                     move_tasks, mem_managers, dp_size_in_node, connect_id_to_comm[connect_id]
                 )
+            # 使用nccl模式搬运KVC
             else:
                 cur_mem.receive_from_prefill_node(
                     move_tasks, mem_managers, dp_size_in_node, connect_id_to_comm[connect_id]
                 )
             logger.info(f"trans finished: {move_tasks[0].to_decode_log_info()} move len: {total_move_kv_len}")
+        # 同步cuda设备
         torch.cuda.synchronize()
         logger.info(f"trans cost time: {(time.time() - start)}, {move_tasks[0].to_decode_log_info()}")
         task_out_queue.put("ok")
@@ -50,6 +57,7 @@ def _handle_kvmove_task(
         raise e
 
 
+# 处理与prefill节点的连接
 def _handle_prefill_join(
     node_info: PDTransJoinInfo, task_out_queue: mp.Queue, connect_id_to_comm: Dict[str, PyNcclCommunicator]
 ):
@@ -89,9 +97,11 @@ def _handle_prefill_join(
         logger.warning(f"error while connect to prefill node: {e}")
 
 
+# 配置相应的环境变量
 def _init_env(args, device_id: int, task_in_queue: mp.Queue, task_out_queue: mp.Queue, mem_queues: List[mp.Queue]):
     import os
 
+    # 设置相应的NCCL变量
     # os.environ["NCCL_DEBUG"] = "INFO"
     os.environ["NCCL_MAX_NCHANNELS"] = "2"
     os.environ["NCCL_NSOCKS_PER_CHANNEL"] = "1"
@@ -105,19 +115,25 @@ def _init_env(args, device_id: int, task_in_queue: mp.Queue, task_out_queue: mp.
         graceful_registry(inspect.currentframe().f_code.co_name)
         task_out_queue.put("proc_start")
 
+        # 获取mem_managers
         mem_managers: List[MemoryManager] = [mem_queue.get(timeout=60) for mem_queue in mem_queues]
 
+        # 通知主进程，mem_managers获取成功
         task_out_queue.put("get_mem_managers_ok")
         connect_id_to_comm: Dict[str, PyNcclCommunicator] = {}
         while True:
             task: Union[KVMoveTaskGroup, PDTransJoinInfo, PDTransLeaveInfo] = task_in_queue.get()
+            # 处理KVMoveTaskGroup任务
             if isinstance(task, KVMoveTaskGroup):
                 _handle_kvmove_task(
                     task.tasks, task_out_queue, mem_managers, connect_id_to_comm, task.connect_id, dp_size_in_node
                 )
+            # 与prefill节点建立连接
             elif isinstance(task, PDTransJoinInfo):
                 _handle_prefill_join(task, task_out_queue, connect_id_to_comm)
+            # 与prefill节点断开连接
             elif isinstance(task, PDTransLeaveInfo):
+                # 销毁与prefill节点的连接
                 if task.connect_id in connect_id_to_comm:
                     connect_id_to_comm[task.connect_id].destroy()
                     logger.info(f"destory {task} nccl communicator.")
@@ -132,6 +148,7 @@ def _init_env(args, device_id: int, task_in_queue: mp.Queue, task_out_queue: mp.
         raise
 
 
+# 用于启动一个KVC传输进程
 def start_decode_trans_process(
     args,
     device_id: int,

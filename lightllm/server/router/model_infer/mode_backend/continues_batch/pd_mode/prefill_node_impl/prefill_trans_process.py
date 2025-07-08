@@ -18,6 +18,7 @@ from lightllm.distributed.pynccl import StatelessP2PProcessGroup, PyNcclCommunic
 logger = init_logger(__name__)
 
 
+# 处理KVMoveTaskGroup任务
 def _handle_kvmove_task(
     move_tasks: List[KVMoveTask],
     task_out_queue: mp.Queue,
@@ -26,17 +27,21 @@ def _handle_kvmove_task(
     connect_id: str,
     dp_size_in_node: int,
 ):
+    # 计算需要搬运的kv长度
     total_move_kv_len = sum([task.move_kv_len for task in move_tasks])
     try:
         device_index = connect_id_to_comm[connect_id].device.index
         start = time.time()
         if total_move_kv_len != 0:
+            # 获取当前设备对应的mem manager
             logger.info(f"trans start: {move_tasks[0].to_prefill_log_info()}")
             cur_mem = mem_managers[device_index]
+            # 使用p2p模式搬运KVC
             if kv_trans_use_p2p():
                 cur_mem.send_to_decode_node_p2p(
                     move_tasks, mem_managers, dp_size_in_node, connect_id_to_comm[connect_id]
                 )
+            # 使用nccl模式搬运KVC
             else:
                 cur_mem.send_to_decode_node(move_tasks, mem_managers, dp_size_in_node, connect_id_to_comm[connect_id])
             logger.info(f"trans finished: {move_tasks[0].to_prefill_log_info()} move len: {total_move_kv_len}")
@@ -51,6 +56,7 @@ def _handle_kvmove_task(
         task_out_queue.put("fail")
 
 
+# 处理与decode节点的连接
 def _handle_decode_join(
     node_info: PDTransJoinInfo,
     task_out_queue: mp.Queue,
@@ -85,6 +91,7 @@ def _handle_decode_join(
         logger.warning(f"error while connect to decode node: {e} node_info {node_info}")
 
 
+# 初始化prefill节点的环境
 def _init_env(
     args,
     store_ip,
@@ -116,12 +123,15 @@ def _init_env(
 
         while True:
             task: Union[KVMoveTaskGroup, PDTransJoinInfo, PDTransLeaveInfo] = task_in_queue.get()
+            # 处理KVMoveTaskGroup任务
             if isinstance(task, KVMoveTaskGroup):
                 _handle_kvmove_task(
                     task.tasks, task_out_queue, mem_managers, connect_id_to_comm, task.connect_id, dp_size_in_node
                 )
+            # 处理与decode节点的连接
             elif isinstance(task, PDTransJoinInfo):
                 _handle_decode_join(task, task_out_queue, connect_id_to_comm, master_store)
+            # 处理与decode节点的断开连接
             elif isinstance(task, PDTransLeaveInfo):
                 if task.connect_id in connect_id_to_comm:
                     connect_id_to_comm[task.connect_id].destroy()
@@ -137,6 +147,7 @@ def _init_env(
         pass
 
 
+# 启动prefill节点的KVC搬运进程
 def start_prefill_trans_process(
     args,
     store_ip,

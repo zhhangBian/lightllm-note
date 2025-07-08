@@ -256,6 +256,7 @@ class KVTransConnectObj:
         return log
 
 
+# 用于封装相应的KVC传输进程
 @dataclass
 class KVTransProcess:
     process: mp.Process = None

@@ -31,6 +31,7 @@ thread_local_data = threading.local()
 KV_MOVE_MAX_NUM = 16
 
 
+# 用于管理decode节点的KVC搬运
 class DecodeKVMoveManager(rpyc.Service):
     def __init__(self, args, info_queue: mp.Queue, mem_queues: List[mp.Queue]):
         super().__init__()
