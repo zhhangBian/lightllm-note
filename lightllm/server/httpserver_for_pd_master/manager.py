@@ -12,7 +12,7 @@ import ujson as json
 import pickle
 
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-from typing import Union, List, Tuple, Dict, Callable
+from typing import Union, List, Tuple, Dict
 from lightllm.server.core.objs import FinishStatus
 from ..pd_io_struct import PD_Client_Obj, UpKVStatus, ObjType
 from lightllm.server.core.objs import SamplingParams
