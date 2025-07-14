@@ -43,7 +43,7 @@ class PDManager:
         self.selector: PDSelector = create_selector(args.select_p_d_node_func_name, self.prefill_nodes, self.decode_nodes)
         return
 
-    def register_pd(self, pd_info_json, websocket):
+    async def register_pd(self, pd_info_json, websocket):
         pd_client = PD_Client_Obj(**pd_info_json)
         pd_client.websocket = websocket
         self.url_to_pd_nodes[pd_client.client_ip_port] = pd_client
@@ -56,14 +56,12 @@ class PDManager:
         else:
             assert False
 
-        # 更新选择器的节点列表
-        self.selector.prefill_nodes = self.prefill_nodes
-        self.selector.decode_nodes = self.decode_nodes
+        await self.selector.update_nodes(self.prefill_nodes, self.decode_nodes)
 
         logger.info(f"mode: {pd_client.mode} url: {pd_client.client_ip_port} registed")
         return
 
-    def remove_pd(self, pd_info_json):
+    async def remove_pd(self, pd_info_json):
         pd_client = PD_Client_Obj(**pd_info_json)
         try:
             del self.url_to_pd_nodes[pd_client.client_ip_port]
@@ -77,9 +75,7 @@ class PDManager:
         self.prefill_nodes = [e for e in self.prefill_nodes if e.client_ip_port != pd_client.client_ip_port]
         self.decode_nodes = [e for e in self.decode_nodes if e.client_ip_port != pd_client.client_ip_port]
 
-        # 更新选择器的节点列表
-        self.selector.prefill_nodes = self.prefill_nodes
-        self.selector.decode_nodes = self.decode_nodes
+        await self.selector.update_nodes(self.prefill_nodes, self.decode_nodes)
 
         logger.info(f"mode: {pd_client.mode} url: {pd_client.client_ip_port} removed")
         return
@@ -109,11 +105,11 @@ class HttpServerManagerForPDMaster:
         return
 
     async def register_pd(self, pd_info_json, websocket):
-        self.pd_manager.register_pd(pd_info_json, websocket)
+        await self.pd_manager.register_pd(pd_info_json, websocket)
         return
 
     async def remove_pd(self, pd_info_json):
-        self.pd_manager.remove_pd(pd_info_json)
+        await self.pd_manager.remove_pd(pd_info_json)
         return
 
     async def update_req_status(self, upkv_status: UpKVStatus):

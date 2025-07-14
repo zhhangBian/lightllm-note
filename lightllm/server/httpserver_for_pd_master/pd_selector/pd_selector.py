@@ -9,6 +9,10 @@ class PDSelector:
         self.prefill_nodes = prefill_nodes
         self.decode_nodes = decode_nodes
 
+    async def update_nodes(self, prefill_nodes, decode_nodes):
+        self.prefill_nodes = prefill_nodes
+        self.decode_nodes = decode_nodes
+
     async def select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
         raise NotImplementedError("Subclass must implement this method")
 
