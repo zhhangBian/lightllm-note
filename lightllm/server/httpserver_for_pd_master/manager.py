@@ -35,7 +35,7 @@ class PDManager:
         self.prefill_nodes: List[PD_Client_Obj] = []
         self.decode_nodes: List[PD_Client_Obj] = []
         self.url_to_pd_nodes: Dict[str, PD_Client_Obj] = {}
-        self.select_p_d_node_func = None
+        self.select_p_d_node_func = self._get_select_p_d_node_func(args.select_p_d_node_func)
         return
 
     def register_pd(self, pd_info_json, websocket):
@@ -67,9 +67,11 @@ class PDManager:
 
     def _get_select_p_d_node_func(self, select_p_d_node_func_name: str) -> Callable[[Union[str, List[int]], SamplingParams, MultimodalParams], Tuple[PD_Client_Obj, PD_Client_Obj]]:
         if select_p_d_node_func_name == "random":
+            return self._random_select_p_d_node
+        elif select_p_d_node_func_name == "round_robin":
             self.prefill_node_index = 0
             self.decode_node_index = 0
-            return self._random_select_p_d_node
+            return self._round_robin_select_p_d_node
         elif select_p_d_node_func_name == "memory":
             return self._memory_select_p_d_node
         elif select_p_d_node_func_name == "radix":
