@@ -40,11 +40,8 @@ class PDManager:
         self.prefill_nodes: List[PD_Client_Obj] = []
         self.decode_nodes: List[PD_Client_Obj] = []
         self.url_to_pd_nodes: Dict[str, PD_Client_Obj] = {}
-        self.selector: PDSelector = self._create_selector(args.select_p_d_node_func)
+        self.selector: PDSelector = create_selector(args.select_p_d_node_func_name, self.prefill_nodes, self.decode_nodes)
         return
-
-    def _create_selector(self, select_p_d_node_func_name: str) -> PDSelector:
-        return create_selector(select_p_d_node_func_name, self.prefill_nodes, self.decode_nodes)
 
     def register_pd(self, pd_info_json, websocket):
         pd_client = PD_Client_Obj(**pd_info_json)
