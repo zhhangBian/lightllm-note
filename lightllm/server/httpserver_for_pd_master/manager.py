@@ -65,7 +65,7 @@ class PDManager:
         logger.info(f"mode: {pd_client.mode} url: {pd_client.client_ip_port} removed")
         return
 
-    def _get_select_p_d_node_func(self, select_p_d_node_func_name: str) -> Callable[[Union[str, List[int]], SamplingParams, MultimodalParams], Tuple[PD_Client_Obj, PD_Client_Obj]]:
+    def _get_select_p_d_node_func(self, select_p_d_node_func_name: str):
         if select_p_d_node_func_name == "random":
             return self._random_select_p_d_node
         elif select_p_d_node_func_name == "round_robin":
@@ -79,28 +79,88 @@ class PDManager:
         else:
             raise ValueError(f"invalid select_p_d_node_func_name: {select_p_d_node_func_name}")
 
-    def select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
+    async def select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
         assert self.select_p_d_node_func is not None, "select_p_d_node_func is not set"
-        return self.select_p_d_node_func(prompt, sampling_params, multimodal_params)
+        return await self.select_p_d_node_func(prompt, sampling_params, multimodal_params)
 
-    def _random_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
+    async def _random_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
         import random
 
         p_node = random.choice(self.prefill_nodes)
         d_node = random.choice(self.decode_nodes)
         return p_node, d_node
 
-    def _round_robin_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
+    async def _round_robin_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
         p_node = self.prefill_nodes[self.prefill_node_index]
         d_node = self.decode_nodes[self.decode_node_index]
         self.prefill_node_index = (self.prefill_node_index + 1) % len(self.prefill_nodes)
         self.decode_node_index = (self.decode_node_index + 1) % len(self.decode_nodes)
         return p_node, d_node
 
-    def _memory_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
-        pass
+    # 哪个节点内存占用最小，就选哪个
+    async def _memory_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
+        import aiohttp
+        import asyncio
+        import random
+        async def get_node_memory_usage(node: PD_Client_Obj) -> float:
+            """获取节点的内存使用率"""
+            try:
+                node_url = f"http://{node.client_ip_port}/token_load"
+                timeout = aiohttp.ClientTimeout(total=5.0)  # 5秒超时
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(node_url) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            # 获取当前负载，这表示内存使用情况
+                            # current_load 值越大表示使用的内存越多
+                            current_load = data.get("current_load", 0.0)
+                            if isinstance(current_load, list):
+                                # 如果是列表，取第一个值（通常dp=1时会返回单个值的列表）
+                                current_load = current_load[0] if current_load else 0.0
+                            return float(current_load)
+                        else:
+                            logger.warning(f"Failed to get token_load from {node.client_ip_port}, status: {response.status}")
+                            return 0.0
+            except Exception as e:
+                logger.warning(f"Error getting memory usage from {node.client_ip_port}: {str(e)}")
+                return 0.0
 
-    def _radix_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
+        # 并行获取所有prefill节点的内存使用情况
+        prefill_tasks = [get_node_memory_usage(node) for node in self.prefill_nodes]
+        prefill_usages = await asyncio.gather(*prefill_tasks, return_exceptions=True)
+
+        # 并行获取所有decode节点的内存使用情况
+        decode_tasks = [get_node_memory_usage(node) for node in self.decode_nodes]
+        decode_usages = await asyncio.gather(*decode_tasks, return_exceptions=True)
+
+        # 处理异常结果，将异常替换为0.0
+        prefill_usages = [usage if not isinstance(usage, Exception) else sys.float_info.max for usage in prefill_usages]
+        decode_usages = [usage if not isinstance(usage, Exception) else sys.float_info.max for usage in decode_usages]
+
+        # 找到内存使用最少的prefill节点
+        min_prefill_usage = sys.float_info.max
+        min_prefill_index = 0
+        for i, usage in enumerate(prefill_usages):
+            if usage < min_prefill_usage:
+                min_prefill_usage = usage
+                min_prefill_index = i
+        p_node = self.prefill_nodes[min_prefill_index] if min_prefill_usage != sys.float_info.max else random.choice(self.prefill_nodes)
+
+        # 找到内存使用最少的decode节点
+        min_decode_usage = sys.float_info.max
+        min_decode_index = 0
+        for i, usage in enumerate(decode_usages):
+            if usage < min_decode_usage:
+                min_decode_usage = usage
+                min_decode_index = i
+        d_node = self.decode_nodes[min_decode_index] if min_decode_usage != sys.float_info.max else random.choice(self.decode_nodes)
+
+        logger.debug(f"Selected prefill node {p_node.client_ip_port} with usage {min_prefill_usage}")
+        logger.debug(f"Selected decode node {d_node.client_ip_port} with usage {min_decode_usage}")
+
+        return p_node, d_node
+
+    async def _radix_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
         pass
 
 class HttpServerManagerForPDMaster:
@@ -162,7 +222,7 @@ class HttpServerManagerForPDMaster:
     async def select_p_d_node(
         self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams
     ) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
-        return self.pd_manager.select_p_d_node(prompt, sampling_params, multimodal_params)
+        return await self.pd_manager.select_p_d_node(prompt, sampling_params, multimodal_params)
 
     async def generate(
         self,
