@@ -12,7 +12,7 @@ import ujson as json
 import pickle
 
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-from typing import Union, List, Tuple, Dict
+from typing import Union, List, Tuple, Dict, Callable
 from lightllm.server.core.objs import FinishStatus
 from ..pd_io_struct import PD_Client_Obj, UpKVStatus, ObjType
 from lightllm.server.core.objs import SamplingParams
@@ -29,29 +29,16 @@ from lightllm.utils.error_utils import ServerBusyError
 logger = init_logger(__name__)
 
 
-class HttpServerManagerForPDMaster:
-    def __init__(
-        self,
-        args,
-        metric_port,
-    ):
+class PDManager:
+    def __init__(self, args):
         self.args = args
-        self.metric_client = MetricClient(metric_port)
-        self.id_gen = ReqIDGenerator()
         self.prefill_nodes: List[PD_Client_Obj] = []
         self.decode_nodes: List[PD_Client_Obj] = []
         self.url_to_pd_nodes: Dict[str, PD_Client_Obj] = {}
-
-        self.req_id_to_out_inf: Dict[int, ReqStatus] = {}
-        self.infos_queues = None  # 这个需要延迟初始化，否则使用的loop不对
-
-        self.tokenizer = get_tokenizer(args.model_dir, args.tokenizer_mode, trust_remote_code=args.trust_remote_code)
-
-        self.first_time_costs = MovingAverage()
-        self.per_token_costs = MovingAverage()
+        self.select_p_d_node_func = None
         return
 
-    async def register_pd(self, pd_info_json, websocket):
+    def register_pd(self, pd_info_json, websocket):
         pd_client = PD_Client_Obj(**pd_info_json)
         pd_client.websocket = websocket
         self.url_to_pd_nodes[pd_client.client_ip_port] = pd_client
@@ -67,7 +54,7 @@ class HttpServerManagerForPDMaster:
         logger.info(f"mode: {pd_client.mode} url: {pd_client.client_ip_port} registed")
         return
 
-    async def remove_pd(self, pd_info_json):
+    def remove_pd(self, pd_info_json):
         pd_client = PD_Client_Obj(**pd_info_json)
         try:
             del self.url_to_pd_nodes[pd_client.client_ip_port]
@@ -76,6 +63,71 @@ class HttpServerManagerForPDMaster:
         self.prefill_nodes = [e for e in self.prefill_nodes if e.client_ip_port != pd_client.client_ip_port]
         self.decode_nodes = [e for e in self.decode_nodes if e.client_ip_port != pd_client.client_ip_port]
         logger.info(f"mode: {pd_client.mode} url: {pd_client.client_ip_port} removed")
+        return
+
+    def _get_select_p_d_node_func(self, select_p_d_node_func_name: str) -> Callable[[Union[str, List[int]], SamplingParams, MultimodalParams], Tuple[PD_Client_Obj, PD_Client_Obj]]:
+        if select_p_d_node_func_name == "random":
+            self.prefill_node_index = 0
+            self.decode_node_index = 0
+            return self._random_select_p_d_node
+        elif select_p_d_node_func_name == "memory":
+            return self._memory_select_p_d_node
+        elif select_p_d_node_func_name == "radix":
+            return self._radix_select_p_d_node
+        else:
+            raise ValueError(f"invalid select_p_d_node_func_name: {select_p_d_node_func_name}")
+
+    def select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
+        assert self.select_p_d_node_func is not None, "select_p_d_node_func is not set"
+        return self.select_p_d_node_func(prompt, sampling_params, multimodal_params)
+
+    def _random_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
+        import random
+
+        p_node = random.choice(self.prefill_nodes)
+        d_node = random.choice(self.decode_nodes)
+        return p_node, d_node
+
+    def _round_robin_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
+        p_node = self.prefill_nodes[self.prefill_node_index]
+        d_node = self.decode_nodes[self.decode_node_index]
+        self.prefill_node_index = (self.prefill_node_index + 1) % len(self.prefill_nodes)
+        self.decode_node_index = (self.decode_node_index + 1) % len(self.decode_nodes)
+        return p_node, d_node
+
+    def _memory_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
+        pass
+
+    def _radix_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
+        pass
+
+class HttpServerManagerForPDMaster:
+    def __init__(
+        self,
+        args,
+        metric_port,
+    ):
+        self.args = args
+        self.metric_client = MetricClient(metric_port)
+        self.id_gen = ReqIDGenerator()
+
+        self.pd_manager = PDManager(args)
+
+        self.req_id_to_out_inf: Dict[int, ReqStatus] = {}
+        self.infos_queues = None  # 这个需要延迟初始化，否则使用的loop不对
+
+        self.tokenizer = get_tokenizer(args.model_dir, args.tokenizer_mode, trust_remote_code=args.trust_remote_code)
+
+        self.first_time_costs = MovingAverage()
+        self.per_token_costs = MovingAverage()
+        return
+
+    async def register_pd(self, pd_info_json, websocket):
+        self.pd_manager.register_pd(pd_info_json, websocket)
+        return
+
+    async def remove_pd(self, pd_info_json):
+        self.pd_manager.remove_pd(pd_info_json)
         return
 
     async def update_req_status(self, upkv_status: UpKVStatus):
@@ -108,20 +160,7 @@ class HttpServerManagerForPDMaster:
     async def select_p_d_node(
         self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams
     ) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
-        return self._randome_select_p_d_node(prompt, sampling_params, multimodal_params)
-
-    def _randome_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
-        import random
-
-        p_node = random.choice(self.prefill_nodes)
-        d_node = random.choice(self.decode_nodes)
-        return p_node, d_node
-
-    def _memory_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
-        pass
-
-    def _radix_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
-        pass
+        return self.pd_manager.select_p_d_node(prompt, sampling_params, multimodal_params)
 
     async def generate(
         self,
