@@ -60,6 +60,11 @@ class PDManager:
             del self.url_to_pd_nodes[pd_client.client_ip_port]
         except:
             pass
+
+        # 从内存缓存中删除该节点的数据
+        if hasattr(self, 'node_memory_cache'):
+            self.node_memory_cache.pop(pd_client.client_ip_port, None)
+
         self.prefill_nodes = [e for e in self.prefill_nodes if e.client_ip_port != pd_client.client_ip_port]
         self.decode_nodes = [e for e in self.decode_nodes if e.client_ip_port != pd_client.client_ip_port]
         logger.info(f"mode: {pd_client.mode} url: {pd_client.client_ip_port} removed")
@@ -73,11 +78,72 @@ class PDManager:
             self.decode_node_index = 0
             return self._round_robin_select_p_d_node
         elif select_p_d_node_func_name == "memory":
+            # 内存使用情况缓存
+            self.node_memory_cache: Dict[str, float] = {}  # 节点IP:PORT -> 内存使用率
+            self.memory_monitor_task = None
+            self._start_memory_monitor()
             return self._memory_select_p_d_node
         elif select_p_d_node_func_name == "radix":
             return self._radix_select_p_d_node
         else:
             raise ValueError(f"invalid select_p_d_node_func_name: {select_p_d_node_func_name}")
+
+    def _start_memory_monitor(self):
+        """启动内存监控后台任务"""
+        import asyncio
+
+        if self.memory_monitor_task is None or self.memory_monitor_task.done():
+            try:
+                loop = asyncio.get_event_loop()
+                self.memory_monitor_task = loop.create_task(self._memory_monitor_loop())
+                logger.info("Started memory monitoring task")
+            except RuntimeError:
+                logger.warning("No event loop running, memory monitoring will start later")
+
+    async def _memory_monitor_loop(self):
+        """后台内存监控循环，每秒更新一次所有节点的内存使用情况"""
+        import aiohttp
+        import asyncio
+
+        async def get_node_memory_usage(node: PD_Client_Obj) -> tuple:
+            try:
+                node_url = f"http://{node.client_ip_port}/token_load"
+                timeout = aiohttp.ClientTimeout(total=3.0)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(node_url) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            current_load = data.get("current_load", 0.0)
+                            if isinstance(current_load, list):
+                                current_load = current_load[0] if current_load else 0.0
+                            return node.client_ip_port, float(current_load)
+                        else:
+                            logger.warning(f"Failed to get token_load from {node.client_ip_port}, status: {response.status}")
+                            return node.client_ip_port, float('inf')
+            except Exception as e:
+                logger.warning(f"Error getting memory usage from {node.client_ip_port}: {str(e)}")
+                return node.client_ip_port, float('inf')
+
+        while True:
+            try:
+                all_nodes = self.prefill_nodes + self.decode_nodes
+                tasks = [get_node_memory_usage(node) for node in all_nodes]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # 更新缓存
+                for result in results:
+                    if isinstance(result, tuple) and len(result) == 2:
+                        node_key, usage = result
+                        self.node_memory_cache[node_key] = usage
+
+                logger.debug(f"Updated memory cache: {self.node_memory_cache}")
+
+                # 等待1秒后再次检查
+                await asyncio.sleep(1.0)
+
+            except Exception as e:
+                logger.error(f"Error in memory monitor loop: {str(e)}")
+                await asyncio.sleep(1.0)
 
     async def select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
         assert self.select_p_d_node_func is not None, "select_p_d_node_func is not set"
@@ -97,66 +163,17 @@ class PDManager:
         self.decode_node_index = (self.decode_node_index + 1) % len(self.decode_nodes)
         return p_node, d_node
 
-    # 哪个节点内存占用最小，就选哪个
+    # 哪个节点内存占用最少，就选哪个
     async def _memory_select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
-        import aiohttp
-        import asyncio
+        # 获取prefill节点的内存使用情况
+        prefill_usages = [self.node_memory_cache.get(node.client_ip_port, float('inf')) for node in self.prefill_nodes]
+        decode_usages = [self.node_memory_cache.get(node.client_ip_port, float('inf')) for node in self.decode_nodes]
+
         import random
-        async def get_node_memory_usage(node: PD_Client_Obj) -> float:
-            """获取节点的内存使用率"""
-            try:
-                node_url = f"http://{node.client_ip_port}/token_load"
-                timeout = aiohttp.ClientTimeout(total=5.0)  # 5秒超时
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.get(node_url) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            # 获取当前负载，这表示内存使用情况
-                            # current_load 值越大表示使用的内存越多
-                            current_load = data.get("current_load", 0.0)
-                            if isinstance(current_load, list):
-                                # 如果是列表，取第一个值（通常dp=1时会返回单个值的列表）
-                                current_load = current_load[0] if current_load else 0.0
-                            return float(current_load)
-                        else:
-                            logger.warning(f"Failed to get token_load from {node.client_ip_port}, status: {response.status}")
-                            return 0.0
-            except Exception as e:
-                logger.warning(f"Error getting memory usage from {node.client_ip_port}: {str(e)}")
-                return 0.0
-
-        # 并行获取所有prefill节点的内存使用情况
-        prefill_tasks = [get_node_memory_usage(node) for node in self.prefill_nodes]
-        prefill_usages = await asyncio.gather(*prefill_tasks, return_exceptions=True)
-
-        # 并行获取所有decode节点的内存使用情况
-        decode_tasks = [get_node_memory_usage(node) for node in self.decode_nodes]
-        decode_usages = await asyncio.gather(*decode_tasks, return_exceptions=True)
-
-        # 处理异常结果，将异常替换为0.0
-        prefill_usages = [usage if not isinstance(usage, Exception) else sys.float_info.max for usage in prefill_usages]
-        decode_usages = [usage if not isinstance(usage, Exception) else sys.float_info.max for usage in decode_usages]
-
-        # 找到内存使用最少的prefill节点
-        min_prefill_usage = sys.float_info.max
-        min_prefill_index = 0
-        for i, usage in enumerate(prefill_usages):
-            if usage < min_prefill_usage:
-                min_prefill_usage = usage
-                min_prefill_index = i
-        p_node = self.prefill_nodes[min_prefill_index] if min_prefill_usage != sys.float_info.max else random.choice(self.prefill_nodes)
-
-        # 找到内存使用最少的decode节点
-        min_decode_usage = sys.float_info.max
-        min_decode_index = 0
-        for i, usage in enumerate(decode_usages):
-            if usage < min_decode_usage:
-                min_decode_usage = usage
-                min_decode_index = i
-        d_node = self.decode_nodes[min_decode_index] if min_decode_usage != sys.float_info.max else random.choice(self.decode_nodes)
-
-        logger.debug(f"Selected prefill node {p_node.client_ip_port} with usage {min_prefill_usage}")
-        logger.debug(f"Selected decode node {d_node.client_ip_port} with usage {min_decode_usage}")
+        min_prefill_usage = min(prefill_usages)
+        min_decode_usage = min(decode_usages)
+        p_node = self.prefill_nodes[prefill_usages.index(min_prefill_usage)] if min_prefill_usage != float('inf') else random.choice(self.prefill_nodes)
+        d_node = self.decode_nodes[decode_usages.index(min_decode_usage)] if min_decode_usage != float('inf') else random.choice(self.decode_nodes)
 
         return p_node, d_node
 
@@ -374,7 +391,7 @@ class HttpServerManagerForPDMaster:
         request: Request,
     ):
         out_token_counter = 0
-        first_token_cost_ms = sys.float_info.max
+        first_token_cost_ms = float('inf')
         group_request_id = sampling_params.group_request_id
         unfinished_count = sampling_params.best_of
         is_first_token = True
@@ -464,6 +481,10 @@ class HttpServerManagerForPDMaster:
     async def handle_loop(self):
         self.infos_queues = AsyncQueue()
         asyncio.create_task(self.timer_log())
+
+        # 如果使用memory策略，确保监控任务已启动
+        if hasattr(self.pd_manager, 'memory_monitor_task') and self.args.select_p_d_node_func == "memory":
+            self.pd_manager._start_memory_monitor()
 
         use_config_server = self.args.config_server_host and self.args.config_server_port
 
