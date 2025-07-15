@@ -40,7 +40,7 @@ class PDManager:
         self.node_info: Dict[str, dict] = {}
         self.prefill_nodes: List[PD_Client_Obj] = []
         self.decode_nodes: List[PD_Client_Obj] = []
-        self.selector: PDSelector = create_selector(args.select_p_d_node_func_name, self.prefill_nodes, self.decode_nodes)
+        self.selector: PDSelector = create_selector(args.select_p_d_node_func_name, self.prefill_nodes, self.decode_nodes, self)
         return
 
     async def register_pd(self, pd_info_json, websocket):
@@ -78,10 +78,6 @@ class PDManager:
         if pd_client.client_ip_port in self.node_info:
             del self.node_info[pd_client.client_ip_port]
 
-        # 从内存缓存中删除该节点的数据(如果是MemorySelector)
-        if isinstance(self.selector, MemorySelector):
-            self.selector.remove_node_cache(pd_client.client_ip_port)
-
         self.prefill_nodes = [e for e in self.prefill_nodes if e.client_ip_port != pd_client.client_ip_port]
         self.decode_nodes = [e for e in self.decode_nodes if e.client_ip_port != pd_client.client_ip_port]
 
@@ -94,8 +90,20 @@ class PDManager:
         """更新节点负载信息"""
         if load_info is not None and "client_ip_port" in load_info:
             ip_port = load_info["client_ip_port"]
-            self.node_info[ip_port]["load"] = load_info["current_load"]
-            logger.debug(f"Updated node load info for {ip_port}: {load_info['current_load']}")
+            if ip_port in self.node_info:
+                current_load = load_info["current_load"]
+                if isinstance(current_load, list):
+                    if len(current_load) > 0:
+                        load_value = float(current_load[0])
+                    else:
+                        load_value = 0.0
+                else:
+                    load_value = float(current_load)
+
+                self.node_info[ip_port]["load"] = load_value
+                logger.debug(f"Updated node load info for {ip_port}: {load_value}")
+            else:
+                logger.warning(f"Received load info for unknown node: {ip_port}")
 
     def get_node_load_info(self):
         """获取所有节点的负载信息"""
@@ -103,7 +111,11 @@ class PDManager:
 
     def get_node_load_info_by_node(self, client_ip_port: str):
         """获取指定节点的负载信息"""
-        return self.node_info.get(client_ip_port, None).get("load", float("inf"))
+        node_info = self.node_info.get(client_ip_port, None)
+        if node_info is not None:
+            return node_info.get("load", float("inf"))
+        else:
+            return float("inf")
 
     async def select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
         return await self.selector.select_p_d_node(prompt, sampling_params, multimodal_params)
@@ -417,10 +429,6 @@ class HttpServerManagerForPDMaster:
     async def handle_loop(self):
         self.infos_queues = AsyncQueue()
         asyncio.create_task(self.timer_log())
-
-        # 如果使用memory策略，确保监控任务已启动
-        if isinstance(self.pd_manager.selector, MemorySelector):
-            self.pd_manager.selector._start_memory_monitor()
 
         use_config_server = self.args.config_server_host and self.args.config_server_port
 
