@@ -37,16 +37,23 @@ logger = init_logger(__name__)
 class PDManager:
     def __init__(self, args):
         self.args = args
+        self.node_info: Dict[str, dict] = {}
         self.prefill_nodes: List[PD_Client_Obj] = []
         self.decode_nodes: List[PD_Client_Obj] = []
-        self.url_to_pd_nodes: Dict[str, PD_Client_Obj] = {}
         self.selector: PDSelector = create_selector(args.select_p_d_node_func_name, self.prefill_nodes, self.decode_nodes)
         return
 
     async def register_pd(self, pd_info_json, websocket):
         pd_client = PD_Client_Obj(**pd_info_json)
         pd_client.websocket = websocket
-        self.url_to_pd_nodes[pd_client.client_ip_port] = pd_client
+        self.node_info[pd_client.client_ip_port] = {
+            "node_id": pd_info_json["pd_node_id"],
+            "client_ip_port": pd_info_json["client_ip_port"],
+            "mode": pd_info_json["mode"],
+            "node": pd_client,
+            "load": 0.0,
+        }
+
         if pd_client.mode == "prefill":
             self.prefill_nodes = [e for e in self.prefill_nodes if e.client_ip_port != pd_client.client_ip_port]
             self.prefill_nodes.append(pd_client)
@@ -54,7 +61,7 @@ class PDManager:
             self.decode_nodes = [e for e in self.decode_nodes if e.client_ip_port != pd_client.client_ip_port]
             self.decode_nodes.append(pd_client)
         else:
-            assert False
+            assert False, f"mode must in ['prefill', 'decode'], but get {pd_client.mode}"
 
         await self.selector.update_nodes(self.prefill_nodes, self.decode_nodes)
 
@@ -64,9 +71,12 @@ class PDManager:
     async def remove_pd(self, pd_info_json):
         pd_client = PD_Client_Obj(**pd_info_json)
         try:
-            del self.url_to_pd_nodes[pd_client.client_ip_port]
+            del self.node_info[pd_client.client_ip_port]
         except:
             pass
+
+        if pd_client.client_ip_port in self.node_info:
+            del self.node_info[pd_client.client_ip_port]
 
         # 从内存缓存中删除该节点的数据(如果是MemorySelector)
         if isinstance(self.selector, MemorySelector):
@@ -79,6 +89,21 @@ class PDManager:
 
         logger.info(f"mode: {pd_client.mode} url: {pd_client.client_ip_port} removed")
         return
+
+    def update_node_load_info(self, load_info: dict):
+        """更新节点负载信息"""
+        if load_info is not None and "client_ip_port" in load_info:
+            ip_port = load_info["client_ip_port"]
+            self.node_info[ip_port]["load"] = load_info["current_load"]
+            logger.debug(f"Updated node load info for {ip_port}: {load_info['current_load']}")
+
+    def get_node_load_info(self):
+        """获取所有节点的负载信息"""
+        return {k: v.get("load", float("inf")) for k, v in self.node_info.items()}
+
+    def get_node_load_info_by_node(self, client_ip_port: str):
+        """获取指定节点的负载信息"""
+        return self.node_info.get(client_ip_port, None).get("load", float("inf"))
 
     async def select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
         return await self.selector.select_p_d_node(prompt, sampling_params, multimodal_params)
@@ -381,6 +406,14 @@ class HttpServerManagerForPDMaster:
     async def put_to_handle_queue(self, obj):
         await self.infos_queues.put(obj)
 
+    def get_node_load_info(self):
+        """获取所有节点的负载信息"""
+        return self.pd_manager.get_node_load_info()
+
+    def get_node_load_info_by_node(self, client_ip_port: str):
+        """获取指定节点的负载信息"""
+        return self.pd_manager.get_node_load_info_by_node(client_ip_port)
+
     async def handle_loop(self):
         self.infos_queues = AsyncQueue()
         asyncio.create_task(self.timer_log())
@@ -402,7 +435,16 @@ class HttpServerManagerForPDMaster:
             try:
                 for obj in objs:
                     if obj[0] == ObjType.TOKEN_PACKS:
-                        for sub_req_id, text, metadata, finish_status in obj[1]:
+                        # 检查是否包含节点信息
+                        if len(obj) >= 3:
+                            handle_list, load_info = obj[1], obj[2]
+                            # 更新节点负载信息
+                            self.pd_manager.update_node_load_info(load_info)
+                        else:
+                            # 兼容旧格式
+                            handle_list = obj[1]
+
+                        for sub_req_id, text, metadata, finish_status in handle_list:
                             finish_status: FinishStatus = finish_status
                             group_req_id = convert_sub_id_to_group_id(sub_req_id)
                             try:
