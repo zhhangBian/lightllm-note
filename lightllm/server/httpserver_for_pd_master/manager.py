@@ -88,7 +88,10 @@ class PDManager:
 
     def update_node_load_info(self, load_info: dict):
         """更新节点负载信息"""
-        if load_info is not None and "client_ip_port" in load_info:
+        if load_info is None:
+            return
+
+        if "client_ip_port" in load_info:
             ip_port = load_info["client_ip_port"]
             if ip_port in self.node_info:
                 current_load = load_info["current_load"]
