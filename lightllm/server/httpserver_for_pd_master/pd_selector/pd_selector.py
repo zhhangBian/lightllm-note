@@ -2,14 +2,13 @@ from typing import Union, List, Tuple
 from lightllm.server.pd_io_struct import PD_Client_Obj
 from lightllm.server.core.objs import SamplingParams
 from lightllm.server.multimodal_params import MultimodalParams
-from lightllm.server.httpserver_for_pd_master.manager import PDManager
 
 
 class PDSelector:
-    def __init__(self, prefill_nodes: List[PD_Client_Obj], decode_nodes: List[PD_Client_Obj], pd_manager: PDManager):
+    def __init__(self, prefill_nodes: List[PD_Client_Obj], decode_nodes: List[PD_Client_Obj], pd_manager):
         self.prefill_nodes: List[PD_Client_Obj] = prefill_nodes
         self.decode_nodes: List[PD_Client_Obj] = decode_nodes
-        self.pd_manager: PDManager = pd_manager
+        self.pd_manager = pd_manager
 
     async def update_nodes(self, prefill_nodes, decode_nodes):
         self.prefill_nodes = prefill_nodes
@@ -33,7 +32,7 @@ class RandomSelector(PDSelector):
 class RoundRobinSelector(PDSelector):
     """轮询选择器"""
 
-    def __init__(self, prefill_nodes: List[PD_Client_Obj], decode_nodes: List[PD_Client_Obj], pd_manager: PDManager):
+    def __init__(self, prefill_nodes: List[PD_Client_Obj], decode_nodes: List[PD_Client_Obj], pd_manager):
         super().__init__(prefill_nodes, decode_nodes, pd_manager)
         self.prefill_node_index: int = 0
         self.decode_node_index: int = 0

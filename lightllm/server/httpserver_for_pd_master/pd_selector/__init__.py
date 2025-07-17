@@ -1,5 +1,5 @@
 from typing import List
-from lightllm.server.httpserver_for_pd_master.manager import PD_Client_Obj, PDManager
+from lightllm.server.httpserver_for_pd_master.manager import PD_Client_Obj
 from .pd_selector import (
     PDSelector,
     RandomSelector,
@@ -16,7 +16,7 @@ __all__ = [
     "RadixSelector"
 ]
 
-def create_selector(selector_type: str, prefill_nodes: List[PD_Client_Obj], decode_nodes: List[PD_Client_Obj], pd_manager: PDManager) -> PDSelector:
+def create_selector(selector_type: str, prefill_nodes: List[PD_Client_Obj], decode_nodes: List[PD_Client_Obj], pd_manager) -> PDSelector:
     if selector_type == "random":
         return RandomSelector(prefill_nodes, decode_nodes, pd_manager)
     elif selector_type == "round_robin":
