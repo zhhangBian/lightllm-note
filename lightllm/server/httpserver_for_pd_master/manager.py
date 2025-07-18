@@ -47,7 +47,7 @@ class PDManager:
         pd_client = PD_Client_Obj(**pd_info_json)
         pd_client.websocket = websocket
         self.node_info[pd_client.client_ip_port] = {
-            "node_id": pd_info_json["pd_node_id"],
+            "node_id": pd_info_json["node_id"],
             "client_ip_port": pd_info_json["client_ip_port"],
             "mode": pd_info_json["mode"],
             "node": pd_client,
