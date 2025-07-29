@@ -28,6 +28,7 @@ def get_tokenizer(
 
 
 def get_output_length(input_num: int, output_len: int) -> List[int]:
+    return [output_len for _ in range(input_num)]
     min_len, max_len = 2, output_len * 2
     mean = (min_len + max_len) * 0.5
     std = mean
@@ -44,9 +45,10 @@ def get_output_length(input_num: int, output_len: int) -> List[int]:
 
 
 def gen_random_input_text(input_len, tokenizer) -> str:
-    random_ids = [random.randint(512, 8192) for _ in range(1024)]
+    input_len_random = random.randint(input_len//2, input_len*2)
+    random_ids = [random.randint(512, 8192) for _ in range(input_len_random)]
     random_text = tokenizer.decode(random_ids)
-    return random_text
+    return random_text, input_len_random
 
 
 def gen_random_data(
@@ -56,9 +58,9 @@ def gen_random_data(
     input_lens = []
     output_lens = get_output_length(input_num, output_len)
     for i in range(input_num):
-        input_text = gen_random_input_text(input_len, tokenizer)
+        input_text, input_len_random = gen_random_input_text(input_len, tokenizer)
         prompts.append(input_text)
-        input_lens.append(input_len)
+        input_lens.append(input_len_random)
     print("Generate random data finish.")
     return prompts, input_lens, output_lens
 

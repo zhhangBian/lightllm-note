@@ -6,3 +6,6 @@ dist
 .idea
 .vscode
 tmp/
+
+results
+.cursor
