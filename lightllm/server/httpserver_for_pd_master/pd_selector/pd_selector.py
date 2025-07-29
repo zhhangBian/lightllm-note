@@ -49,12 +49,12 @@ class MemorySelector(PDSelector):
     """基于内存使用情况的选择器"""
 
     async def select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
-        def _get_min_node(node_infos: dict):
+        def _get_min_node(node_infos: dict, key: str):
             min_node, min_node_len = None, float("inf")
             for node_ip, node_info in node_infos.items():
-                if node_info["mem_len"] < float("inf"):
-                    if node_info["mem_len"] < min_node_len:
-                        min_node_len = node_info["mem_len"]
+                if node_info[key] < float("inf"):
+                    if node_info[key] < min_node_len:
+                        min_node_len = node_info[key]
                         min_node = node_ip
             return min_node
 
@@ -73,8 +73,8 @@ class MemorySelector(PDSelector):
         # 获取负载最小的节点
         p_node_infos = {k: v for k, v in node_infos.items() if k in self.prefill_nodes}
         d_node_infos = {k: v for k, v in node_infos.items() if k in self.decode_nodes}
-        p_node = _get_min_node(p_node_infos) or random.choice(self.prefill_nodes)
-        d_node = _get_min_node(d_node_infos) or random.choice(self.decode_nodes)
+        p_node = _get_min_node(p_node_infos, "mem_len") or random.choice(self.prefill_nodes)
+        d_node = _get_min_node(d_node_infos, "mem_len") or random.choice(self.decode_nodes)
 
         return p_node, d_node
 
