@@ -188,17 +188,17 @@ async def _up_tokens_to_pd_master(forwarding_queue: AsyncQueue, websocket):
                 from lightllm.server.api_http import g_objs
                 if g_objs.shared_token_load is not None:
                     current_load = [
-                        float(g_objs.shared_token_load.get_current_load(dp_index)) for dp_index in range(g_objs.args.dp)
+                        float(g_objs.shared_token_load.get_frozened_token_count(dp_index)) for dp_index in range(g_objs.args.dp)
                     ]
                     if g_objs.args.dp == 1:
                         current_load = current_load[0]
                     load_info = {
-                        "current_load": current_load,
+                        "mem_len": current_load,
                         "client_ip_port": f"{g_objs.httpserver_manager.host_ip}:{g_objs.args.port}"
                     }
                 else:
                     load_info = {
-                        "current_load": 0.0,
+                        "mem_len": 0,
                         "client_ip_port": f"{g_objs.httpserver_manager.host_ip}:{g_objs.args.port}"
                     }
                 await websocket.send(pickle.dumps((ObjType.TOKEN_PACKS, handle_list, load_info)))

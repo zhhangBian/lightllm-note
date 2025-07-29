@@ -49,6 +49,15 @@ class MemorySelector(PDSelector):
     """基于内存使用情况的选择器"""
 
     async def select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
+        def _get_min_node(node_infos: dict):
+            min_node, min_node_len = None, float("inf")
+            for node_ip, node_info in node_infos.items():
+                if node_info["mem_len"] < float("inf"):
+                    if node_info["mem_len"] < min_node_len:
+                        min_node_len = node_info["mem_len"]
+                        min_node = node_ip
+            return min_node
+
         if self.pd_manager is None:
             # 如果没有 PDManager 引用，回退到随机选择
             import random
@@ -56,16 +65,16 @@ class MemorySelector(PDSelector):
             d_node = random.choice(self.decode_nodes) if self.decode_nodes else None
             return p_node, d_node
 
-        # 获取 prefill 节点的内存使用情况
-        prefill_usages = [self.pd_manager.get_node_load_info_by_node(node.client_ip_port) for node in self.prefill_nodes]
-        decode_usages = [self.pd_manager.get_node_load_info_by_node(node.client_ip_port) for node in self.decode_nodes]
+        node_infos = self.pd_manager.get_predict_node_infos()
+        node_infos = {k: v for k, v in node_infos.items() if v["mem_len"] < float("inf")}
+        if len(node_infos) == 0:
+            return random.choice(self.prefill_nodes), random.choice(self.decode_nodes)
 
-        import random
-        min_prefill_usage = min(prefill_usages) if prefill_usages else float('inf')
-        min_decode_usage = min(decode_usages) if decode_usages else float('inf')
-        
-        p_node = self.prefill_nodes[prefill_usages.index(min_prefill_usage)] if min_prefill_usage != float('inf') and prefill_usages else random.choice(self.prefill_nodes)
-        d_node = self.decode_nodes[decode_usages.index(min_decode_usage)] if min_decode_usage != float('inf') and decode_usages else random.choice(self.decode_nodes)
+        # 获取负载最小的节点
+        p_node_infos = {k: v for k, v in node_infos.items() if k in self.prefill_nodes}
+        d_node_infos = {k: v for k, v in node_infos.items() if k in self.decode_nodes}
+        p_node = _get_min_node(p_node_infos) or random.choice(self.prefill_nodes)
+        d_node = _get_min_node(d_node_infos) or random.choice(self.decode_nodes)
 
         return p_node, d_node
 
