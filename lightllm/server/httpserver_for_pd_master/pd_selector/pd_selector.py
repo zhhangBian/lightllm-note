@@ -1,3 +1,5 @@
+import random
+
 from typing import Union, List, Tuple
 from lightllm.server.pd_io_struct import PD_Client_Obj
 from lightllm.server.core.objs import SamplingParams
@@ -22,8 +24,6 @@ class RandomSelector(PDSelector):
     """随机选择器"""
 
     async def select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
-        import random
-
         p_node = random.choice(self.prefill_nodes)
         d_node = random.choice(self.decode_nodes)
         return p_node, d_node
@@ -60,7 +60,6 @@ class MemorySelector(PDSelector):
 
         if self.pd_manager is None:
             # 如果没有 PDManager 引用，回退到随机选择
-            import random
             p_node = random.choice(self.prefill_nodes) if self.prefill_nodes else None
             d_node = random.choice(self.decode_nodes) if self.decode_nodes else None
             return p_node, d_node
