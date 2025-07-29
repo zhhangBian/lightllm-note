@@ -25,10 +25,10 @@ from lightllm.server.metrics.manager import MetricClient
 from lightllm.utils.statics_utils import MovingAverage
 from lightllm.server.httpserver.manager import AsyncQueue
 from lightllm.utils.error_utils import ServerBusyError
+from .node_info_recorder import PredictNodeInfoRecorder
 from .pd_selector import (
     create_selector,
     PDSelector,
-    MemorySelector,
 )
 
 logger = init_logger(__name__)
@@ -37,22 +37,16 @@ logger = init_logger(__name__)
 class PDManager:
     def __init__(self, args):
         self.args = args
-        self.node_info: Dict[str, dict] = {}
         self.prefill_nodes: List[PD_Client_Obj] = []
         self.decode_nodes: List[PD_Client_Obj] = []
+        self.node_info_recorder: PredictNodeInfoRecorder = PredictNodeInfoRecorder()
         self.selector: PDSelector = create_selector(args.select_p_d_node_func, self.prefill_nodes, self.decode_nodes, self)
         return
 
     async def register_pd(self, pd_info_json, websocket):
         pd_client = PD_Client_Obj(**pd_info_json)
         pd_client.websocket = websocket
-        self.node_info[pd_client.client_ip_port] = {
-            "node_id": pd_info_json["node_id"],
-            "client_ip_port": pd_info_json["client_ip_port"],
-            "mode": pd_info_json["mode"],
-            "node": pd_client,
-            "load": 0.0,
-        }
+        self.node_info_recorder.register_node(pd_client)
 
         if pd_client.mode == "prefill":
             self.prefill_nodes = [e for e in self.prefill_nodes if e.client_ip_port != pd_client.client_ip_port]
@@ -70,13 +64,7 @@ class PDManager:
 
     async def remove_pd(self, pd_info_json):
         pd_client = PD_Client_Obj(**pd_info_json)
-        try:
-            del self.node_info[pd_client.client_ip_port]
-        except:
-            pass
-
-        if pd_client.client_ip_port in self.node_info:
-            del self.node_info[pd_client.client_ip_port]
+        self.node_info_recorder.remove_node(pd_client)
 
         self.prefill_nodes = [e for e in self.prefill_nodes if e.client_ip_port != pd_client.client_ip_port]
         self.decode_nodes = [e for e in self.decode_nodes if e.client_ip_port != pd_client.client_ip_port]
@@ -90,38 +78,24 @@ class PDManager:
         """更新节点负载信息"""
         if load_info is None:
             return
-
-        if "client_ip_port" in load_info:
-            ip_port = load_info["client_ip_port"]
-            if ip_port in self.node_info:
-                current_load = load_info["current_load"]
-                if isinstance(current_load, list):
-                    if len(current_load) > 0:
-                        load_value = float(current_load[0])
-                    else:
-                        load_value = 0.0
-                else:
-                    load_value = float(current_load)
-
-                self.node_info[ip_port]["load"] = load_value
-                logger.debug(f"Updated node load info for {ip_port}: {load_value}")
-            else:
-                logger.warning(f"Received load info for unknown node: {ip_port}")
+        self.node_info_recorder.update_node_load_info(load_info)
 
     def get_node_load_info(self):
         """获取所有节点的负载信息"""
-        return {k: v.get("load", float("inf")) for k, v in self.node_info.items()}
+        return self.node_info_recorder.get_node_infos()
+      
+    def get_predict_node_infos(self):
+        """获取所有节点的预测负载信息"""
+        return self.node_info_recorder.get_predict_node_infos()
 
     def get_node_load_info_by_node(self, client_ip_port: str):
         """获取指定节点的负载信息"""
-        node_info = self.node_info.get(client_ip_port, None)
-        if node_info is not None:
-            return node_info.get("load", float("inf"))
-        else:
-            return float("inf")
+        return self.node_info_recorder.get_node_info(client_ip_port)
 
     async def select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
-        return await self.selector.select_p_d_node(prompt, sampling_params, multimodal_params)
+        p_node, d_node = await self.selector.select_p_d_node(prompt, sampling_params, multimodal_params)
+        self.node_info_recorder.update_predict_node_info(p_node, d_node, prompt, sampling_params, multimodal_params)
+        return p_node, d_node
 
 class HttpServerManagerForPDMaster:
     def __init__(
