@@ -182,21 +182,14 @@ def _get_load_info(have_finished_req: bool) -> dict:
         return None
 
     from lightllm.server.api_http import g_objs
-    if g_objs.shared_token_load is not None:
-        current_load = [
-            float(g_objs.shared_token_load.get_frozened_token_count(dp_index)) for dp_index in range(g_objs.args.dp)
-        ]
-        if g_objs.args.dp == 1:
-            current_load = current_load[0]
-        load_info = {
-            "mem_len": current_load,
-            "client_ip_port": f"{g_objs.httpserver_manager.host_ip}:{g_objs.args.port}"
-        }
-    else:
-        load_info = {
-            "mem_len": 0,
-            "client_ip_port": f"{g_objs.httpserver_manager.host_ip}:{g_objs.args.port}"
-        }
+    assert g_objs.shared_token_load is not None, "shared_token_load is not initialized"
+    current_load = [
+        float(g_objs.shared_token_load.get_dynamic_max_load(dp_index)) for dp_index in range(g_objs.args.dp)
+    ]
+    load_info = {
+        "mem_len": min(current_load),
+        "client_ip_port": f"{g_objs.httpserver_manager.host_ip}:{g_objs.args.port}"
+    }
     return load_info
 
 
