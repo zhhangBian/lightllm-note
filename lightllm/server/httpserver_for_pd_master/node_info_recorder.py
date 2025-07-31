@@ -38,7 +38,7 @@ class NodeInfoRecorder:
             else:
                 logger.warning(f"Received load info for unknown node: {ip_port}")
         else:
-            logger.warning(f"Received load info without client_ip_port")
+            logger.warning("Received load info without client_ip_port")
 
     def get_node_infos(self):
         return {k: {
