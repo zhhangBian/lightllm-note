@@ -80,17 +80,9 @@ class PDManager:
             return
         self.node_info_recorder.update_node_load_info(load_info)
 
-    def get_node_load_info(self):
-        """获取所有节点的负载信息"""
-        return self.node_info_recorder.get_node_infos()
-      
     def get_predict_node_infos(self):
         """获取所有节点的预测负载信息"""
         return self.node_info_recorder.get_predict_node_infos()
-
-    def get_node_load_info_by_node(self, client_ip_port: str):
-        """获取指定节点的负载信息"""
-        return self.node_info_recorder.get_node_info(client_ip_port)
 
     async def select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
         p_node, d_node = await self.selector.select_p_d_node(prompt, sampling_params, multimodal_params)
@@ -394,14 +386,6 @@ class HttpServerManagerForPDMaster:
 
     async def put_to_handle_queue(self, obj):
         await self.infos_queues.put(obj)
-
-    def get_node_load_info(self):
-        """获取所有节点的负载信息"""
-        return self.pd_manager.get_node_load_info()
-
-    def get_node_load_info_by_node(self, client_ip_port: str):
-        """获取指定节点的负载信息"""
-        return self.pd_manager.get_node_load_info_by_node(client_ip_port)
 
     async def handle_loop(self):
         self.infos_queues = AsyncQueue()

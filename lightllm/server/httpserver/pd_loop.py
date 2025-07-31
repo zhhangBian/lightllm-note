@@ -176,31 +176,29 @@ async def _pd_process_generate(
         logger.error(str(e))
 
 
+# 获取节点负载信息
+def _get_load_info(have_finished_req: bool) -> dict:
+    if not have_finished_req:
+        return None
+
+    from lightllm.server.api_http import g_objs
+    assert g_objs.shared_token_load is not None, "shared_token_load is not initialized"
+    current_load = [
+        float(g_objs.shared_token_load.get_dynamic_max_load(dp_index)) for dp_index in range(g_objs.args.dp)
+    ]
+    load_info = {
+        "mem_len": min(current_load),
+        "client_ip_port": f"{g_objs.httpserver_manager.host_ip}:{g_objs.args.port}"
+    }
+    return load_info
+
+
 # 转发token的task
 async def _up_tokens_to_pd_master(forwarding_queue: AsyncQueue, websocket):
     while True:
         handle_list = await forwarding_queue.wait_to_get_all_data()
 
         if handle_list:
-            has_finished_req = any(finish_status.is_finished() for _, _, _, finish_status in handle_list)
-            if has_finished_req:
-                # 获取节点负载信息
-                from lightllm.server.api_http import g_objs
-                if g_objs.shared_token_load is not None:
-                    current_load = [
-                        float(g_objs.shared_token_load.get_frozened_token_count(dp_index)) for dp_index in range(g_objs.args.dp)
-                    ]
-                    if g_objs.args.dp == 1:
-                        current_load = current_load[0]
-                    load_info = {
-                        "mem_len": current_load,
-                        "client_ip_port": f"{g_objs.httpserver_manager.host_ip}:{g_objs.args.port}"
-                    }
-                else:
-                    load_info = {
-                        "mem_len": 0,
-                        "client_ip_port": f"{g_objs.httpserver_manager.host_ip}:{g_objs.args.port}"
-                    }
-                await websocket.send(pickle.dumps((ObjType.TOKEN_PACKS, handle_list, load_info)))
-            else:
-                await websocket.send(pickle.dumps((ObjType.TOKEN_PACKS, handle_list, None)))
+            have_finished_req = any(finish_status.is_finished() for _, _, _, finish_status in handle_list)
+            load_info: dict = _get_load_info(have_finished_req)
+            await websocket.send(pickle.dumps((ObjType.TOKEN_PACKS, handle_list, load_info)))

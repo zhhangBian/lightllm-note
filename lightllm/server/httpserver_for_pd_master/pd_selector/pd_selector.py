@@ -52,10 +52,9 @@ class MemorySelector(PDSelector):
         def _get_min_node(node_infos: dict, key: str):
             min_node, min_node_len = None, float("inf")
             for node_ip, node_info in node_infos.items():
-                if node_info[key] < float("inf"):
-                    if node_info[key] < min_node_len:
-                        min_node_len = node_info[key]
-                        min_node = node_ip
+                if node_info[key] < min_node_len:
+                    min_node_len = node_info[key]
+                    min_node = node_ip
             return min_node
 
         if self.pd_manager is None:
@@ -65,18 +64,11 @@ class MemorySelector(PDSelector):
             return p_node, d_node
 
         node_infos = self.pd_manager.get_predict_node_infos()
-        node_infos = {k: v for k, v in node_infos.items() if v["mem_len"] < float("inf")}
-        if len(node_infos) == 0:
-            return random.choice(self.prefill_nodes), random.choice(self.decode_nodes)
 
         # 获取负载最小的节点
-        p_node_infos = {k: v for k, v in node_infos.items() if k in self.prefill_nodes}
-        d_node_infos = {k: v for k, v in node_infos.items() if k in self.decode_nodes}
+        p_node_infos = node_infos["prefill"]
+        d_node_infos = node_infos["decode"]
         p_node = _get_min_node(p_node_infos, "mem_len") or random.choice(self.prefill_nodes)
         d_node = _get_min_node(d_node_infos, "mem_len") or random.choice(self.decode_nodes)
 
         return p_node, d_node
-
-class RadixSelector(PDSelector):
-    async def select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
-        pass
