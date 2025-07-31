@@ -1,6 +1,6 @@
 import random
 
-from typing import Union, List, Tuple
+from typing import Union, List, Tuple, Dict
 from lightllm.server.pd_io_struct import PD_Client_Obj
 from lightllm.server.core.objs import SamplingParams
 from lightllm.server.multimodal_params import MultimodalParams
@@ -49,13 +49,14 @@ class MemorySelector(PDSelector):
     """基于内存使用情况的选择器"""
 
     async def select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
-        def _get_min_node(node_infos: dict, key: str):
-            min_node, min_node_len = None, float("inf")
-            for node_ip, node_info in node_infos.items():
-                if node_info[key] < min_node_len:
-                    min_node_len = node_info[key]
-                    min_node = node_ip
-            return min_node
+        def _get_min_node(nodes: List[PD_Client_Obj], node_infos: Dict[str, dict], key: str) -> PD_Client_Obj:
+            min_node, min_node_value = None, float("inf")
+            for node in nodes:
+                if node.client_ip_port in node_infos:
+                    if node_infos[node.client_ip_port][key] < min_node_value:
+                        min_node_value = node_infos[node.client_ip_port][key]
+                        min_node = node
+            return min_node if min_node is not None else random.choice(nodes)
 
         if self.pd_manager is None:
             # 如果没有 PDManager 引用，回退到随机选择
@@ -68,7 +69,7 @@ class MemorySelector(PDSelector):
         # 获取负载最小的节点
         p_node_infos = node_infos["prefill"]
         d_node_infos = node_infos["decode"]
-        p_node = _get_min_node(p_node_infos, "mem_len") or random.choice(self.prefill_nodes)
-        d_node = _get_min_node(d_node_infos, "mem_len") or random.choice(self.decode_nodes)
+        p_node = _get_min_node(self.prefill_nodes, p_node_infos, "mem_len")
+        d_node = _get_min_node(self.decode_nodes, d_node_infos, "mem_len")
 
         return p_node, d_node
