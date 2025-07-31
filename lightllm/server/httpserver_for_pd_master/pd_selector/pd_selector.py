@@ -76,7 +76,3 @@ class MemorySelector(PDSelector):
         d_node = _get_min_node(d_node_infos, "mem_len") or random.choice(self.decode_nodes)
 
         return p_node, d_node
-
-class RadixSelector(PDSelector):
-    async def select_p_d_node(self, prompt: Union[str, List[int]], sampling_params: SamplingParams, multimodal_params: MultimodalParams) -> Tuple[PD_Client_Obj, PD_Client_Obj]:
-        pass

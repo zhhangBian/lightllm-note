@@ -4,16 +4,14 @@ from .pd_selector import (
     PDSelector,
     RandomSelector,
     RoundRobinSelector,
-    MemorySelector,
-    RadixSelector
+    MemorySelector
 )
 
 __all__ = [
     "PDSelector",
     "RandomSelector", 
     "RoundRobinSelector",
-    "MemorySelector",
-    "RadixSelector"
+    "MemorySelector"
 ]
 
 def create_selector(selector_type: str, prefill_nodes: List[PD_Client_Obj], decode_nodes: List[PD_Client_Obj], pd_manager) -> PDSelector:
@@ -23,7 +21,5 @@ def create_selector(selector_type: str, prefill_nodes: List[PD_Client_Obj], deco
         return RoundRobinSelector(prefill_nodes, decode_nodes, pd_manager)
     elif selector_type == "memory":
         return MemorySelector(prefill_nodes, decode_nodes, pd_manager)
-    elif selector_type == "radix":
-        return RadixSelector(prefill_nodes, decode_nodes, pd_manager)
     else:
         raise ValueError(f"Invalid selector type: {selector_type}")
