@@ -108,6 +108,11 @@ class MemoryManager:
             return self.send_to_decode_node_p2p(
                 move_tasks, mem_managers, dp_size_in_node, nccl_comm
             )
+        # 可以不用支持低端卡，不需要p2p
+        # if dp_size_in_node > 1:
+        #     return self.send_to_decode_node_p2p(
+        #         move_tasks, mem_managers, dp_size_in_node, nccl_comm
+        #     )
 
         # 先将数据发送到指定的一张卡上的buffer，再发送。
 
