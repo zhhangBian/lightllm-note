@@ -105,9 +105,7 @@ class MemoryManager:
         nccl_comm: PyNcclCommunicator,
     ):
         if dp_size_in_node > 1:
-            return self.send_to_decode_node_p2p(
-                move_tasks, mem_managers, dp_size_in_node, nccl_comm
-            )
+            return self.send_to_decode_node_p2p(move_tasks, mem_managers, dp_size_in_node, nccl_comm)
 
         # 先将数据发送到指定的一张卡上的buffer，再发送。
 
@@ -148,9 +146,7 @@ class MemoryManager:
         nccl_comm: PyNcclCommunicator,
     ):
         if dp_size_in_node > 1:
-            return self.receive_from_prefill_node_p2p(
-                move_tasks, mem_managers, dp_size_in_node, nccl_comm
-            )
+            return self.receive_from_prefill_node_p2p(move_tasks, mem_managers, dp_size_in_node, nccl_comm)
         # 先将数据接受到指定的一张卡上的buffer，再复制到其他的卡上。
 
         move_token_indexes = []
@@ -222,7 +218,7 @@ class MemoryManager:
                 self.kv_move_buffer,
                 token_dp_indexes=token_dp_tensor,
                 dp_size_in_node=dp_size_in_node,
-                mem_ptrs_dict=mem_ptrs_dict
+                mem_ptrs_dict=mem_ptrs_dict,
             )
             nccl_comm.send(move_buffer, dst=1)
         return
@@ -234,7 +230,7 @@ class MemoryManager:
         kv_move_buffer: torch.Tensor,
         token_dp_indexes: Optional[torch.Tensor] = None,
         dp_size_in_node: int = 1,
-        mem_ptrs_dict: Optional[dict] = None
+        mem_ptrs_dict: Optional[dict] = None,
     ):
         move_token_num = len(token_indexes)
         move_size = self.token_dim_size * move_token_num
@@ -301,7 +297,7 @@ class MemoryManager:
                 layer_index,
                 token_dp_indexes=token_dp_tensor,
                 dp_size_in_node=dp_size_in_node,
-                mem_ptrs_dict=mem_ptrs_dict
+                mem_ptrs_dict=mem_ptrs_dict,
             )
         return
 
@@ -312,7 +308,7 @@ class MemoryManager:
         layer_index: int,
         token_dp_indexes: Optional[torch.Tensor] = None,
         dp_size_in_node: int = 1,
-        mem_ptrs_dict: Optional[dict] = None
+        mem_ptrs_dict: Optional[dict] = None,
     ):
         move_token_num = len(token_indexes)
         if dp_size_in_node == 1 or token_dp_indexes is None:
