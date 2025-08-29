@@ -3,6 +3,7 @@ import time
 import sys
 import inspect
 import threading
+import setproctitle
 import torch.multiprocessing as mp
 from torch.distributed import TCPStore
 from datetime import timedelta
@@ -95,6 +96,8 @@ def _init_env(
     mem_queues: List[mp.Queue],
 ):
     import os
+
+    setproctitle.setproctitle(f"lightllm::prefill_trans:DEVICE{device_id}")
 
     # os.environ["NCCL_DEBUG"] = "INFO"
     os.environ["NCCL_MAX_NCHANNELS"] = "2"
