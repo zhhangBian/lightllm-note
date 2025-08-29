@@ -101,7 +101,7 @@ def _init_env(args, device_id: int, task_in_queue: mp.Queue, task_out_queue: mp.
 
     dp_size_in_node = max(1, args.dp // args.nnodes)
 
-    setproctitle.setproctitle(f"lightllm::decode_trans:DEVICE{device_id}_DpSizeInNode{dp_size_in_node}")
+    setproctitle.setproctitle(f"lightllm::decode_trans:Device{device_id}_DpSizeInNode{dp_size_in_node}")
 
     try:
         torch.cuda.set_device(device_id)

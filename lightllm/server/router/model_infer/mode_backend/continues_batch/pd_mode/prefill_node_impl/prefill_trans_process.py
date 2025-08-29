@@ -97,13 +97,14 @@ def _init_env(
 ):
     import os
 
-    setproctitle.setproctitle(f"lightllm::prefill_trans:DEVICE{device_id}")
-
     # os.environ["NCCL_DEBUG"] = "INFO"
     os.environ["NCCL_MAX_NCHANNELS"] = "2"
     os.environ["NCCL_NSOCKS_PER_CHANNEL"] = "1"
     os.environ["NCCL_SOCKET_NTHREADS"] = "1"
     torch.backends.cudnn.enabled = False
+
+    dp_size_in_node = max(1, args.dp // args.nnodes)
+    setproctitle.setproctitle(f"lightllm::prefill_trans:Device{device_id}_DpSizeInNode{dp_size_in_node}")
 
     try:
         torch.cuda.set_device(device_id)
@@ -111,7 +112,6 @@ def _init_env(
         master_store = TCPStore(
             host_name=store_ip, port=store_port, is_master=True, use_libuv=True, timeout=timedelta(seconds=30)
         )
-        dp_size_in_node = max(1, args.dp // args.nnodes)
         task_out_queue.put("proc_start")
         mem_managers: List[MemoryManager] = [mem_queue.get(timeout=60) for mem_queue in mem_queues]
         task_out_queue.put("get_mem_managers_ok")
