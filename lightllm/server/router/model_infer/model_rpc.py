@@ -208,7 +208,7 @@ def _init_env(
 
     # 注册graceful 退出的处理
     graceful_registry(inspect.currentframe().f_code.co_name)
-    setproctitle.setproctitle(f"lightllm::model_infer:rank{rank}_rank_in_node{rank_in_node}")
+    setproctitle.setproctitle(f"lightllm::model_infer:MODE{args.run_mode}_RANK{rank}_RANK_IN_NODE{rank_in_node}")
     start_parent_check_thread()
 
     # 将调度锁注册到全局的共享变量中
