@@ -1,19 +1,17 @@
-import torch
-import torch.nn as nn
-import re
 import ast
-import numpy as np
+import math
+import re
 from functools import partial, reduce
 from typing import Dict, Optional, Union
 
+import numpy as np
+import torch
 from PIL import Image
-from transformers import (
-    SiglipVisionConfig,
-    SiglipVisionModel,
+from transformers.image_processing_utils import (
     BaseImageProcessor,
     BatchFeature,
+    get_size_dict,
 )
-from transformers.image_processing_utils import get_size_dict
 from transformers.image_transforms import (
     convert_to_rgb,
     normalize,
@@ -96,6 +94,33 @@ def get_anyres_image_grid_shape(image_size, grid_pinpoints, patch_size):
     return width // patch_size, height // patch_size
 
 
+# This functions is not used.
+def resize_and_pad_image(image, target_resolution):
+    original_width, original_height = image.size
+    target_width, target_height = target_resolution
+
+    scale_w = target_width / original_width
+    scale_h = target_height / original_height
+
+    if scale_w < scale_h:
+        new_width = target_width
+        new_height = min(math.ceil(original_height * scale_w), target_height)
+    else:
+        new_height = target_height
+        new_width = min(math.ceil(original_width * scale_h), target_width)
+
+    # Resize the image
+    resized_image = image.resize((new_width, new_height))
+
+    new_image = Image.new("RGB", (target_width, target_height), (0, 0, 0))
+    paste_x = (target_width - new_width) // 2
+    paste_y = (target_height - new_height) // 2
+    new_image.paste(resized_image, (paste_x, paste_y))
+
+    return new_image
+
+
+# DIFFERENT from sglang.srt.mm_utils.process_anyres_image
 def process_anyres_image(image, processor, grid_pinpoints):
     if isinstance(grid_pinpoints, str) and "x" in grid_pinpoints:
         patch_size = processor.crop_size["height"]
@@ -126,6 +151,25 @@ def process_anyres_image(image, processor, grid_pinpoints):
         processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches
     ]
     return torch.stack(image_patches, dim=0)
+
+
+def process_images(images, image_processor, model_cfg):
+    image_aspect_ratio = getattr(model_cfg, "image_aspect_ratio", "")
+    new_images = []
+    if image_aspect_ratio == "pad":
+        for image in images:
+            image = expand2square(image, tuple(int(x * 255) for x in image_processor.image_mean))
+            image = image_processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
+            new_images.append(image)
+    elif image_aspect_ratio == "anyres" or "anyres_max" in image_aspect_ratio:
+        for image in images:
+            image = process_anyres_image(image, image_processor, model_cfg.image_grid_pinpoints)
+            new_images.append(image)
+    else:
+        return image_processor(images, return_tensors="pt")["pixel_values"]
+    if all(x.shape == new_images[0].shape for x in new_images):
+        new_images = torch.stack(new_images, dim=0)
+    return new_images
 
 
 class Mineru2ImageProcessor(BaseImageProcessor):
@@ -194,8 +238,8 @@ class Mineru2ImageProcessor(BaseImageProcessor):
                 pixel_values.append(image)
         elif image_aspect_ratio == "anyres" or "anyres_max" in image_aspect_ratio:
             for image in images:
-                image_processed = process_anyres_image(image, self, self.image_grid_pinpoints)
-                pixel_values.append(image_processed.numpy())
+                image = process_anyres_image(image, self, self.image_grid_pinpoints)
+                pixel_values.append(image.numpy())
         else:
             pixel_values = self._preprocess(images)["pixel_values"]
 
@@ -225,118 +269,3 @@ class Mineru2ImageProcessor(BaseImageProcessor):
                 self.in_e2e_processing = False
 
         return BatchFeature(data=data, tensor_type=return_tensors)
-
-
-class SiglipVisionTower(nn.Module):
-    def __init__(self, vision_tower):
-        super().__init__()
-
-        self.config = SiglipVisionConfig.from_pretrained(vision_tower)
-        assert isinstance(self.config, SiglipVisionConfig)
-        self.config.num_hidden_layers -= 1  # drop the last hidden layer
-        self.config.vision_use_head = False
-
-        self.vision_tower = SiglipVisionModel(self.config)
-        self.vision_tower.requires_grad_(False)
-
-    def forward(self, images):
-        if type(images) is list:
-            image_features = []
-            for image in images:
-                image_forward_out = self.vision_tower(
-                    image.to(device=self.device, dtype=self.dtype).unsqueeze(0), output_hidden_states=True
-                )
-                image_feature = image_forward_out.hidden_states[-1].to(image.dtype)
-                image_features.append(image_feature)
-        else:
-            image_forward_outs = self.vision_tower(
-                images.to(device=self.device, dtype=self.dtype), output_hidden_states=True
-            )
-            image_features = image_forward_outs.hidden_states[-1].to(images.dtype)
-
-        return image_features
-
-    @property
-    def dtype(self):
-        return self.vision_tower.dtype
-
-    @property
-    def device(self):
-        return self.vision_tower.device
-
-    @property
-    def hidden_size(self):
-        return self.config.hidden_size
-
-
-def build_vision_tower(config):
-    # ... (paste the full function code here)
-    vision_tower = getattr(config, "mm_vision_tower", getattr(config, "vision_tower", ""))
-    # In LightLLM, model path is handled by the framework, we can directly use the identifier
-    if "siglip" in vision_tower.lower():
-        return SiglipVisionTower(vision_tower)
-    raise ValueError(f"Unknown vision tower: {vision_tower}")
-
-
-def build_vision_projector(config):
-    # ... (paste the full function code here)
-    projector_type = getattr(config, "mm_projector_type", "linear")
-
-    if projector_type == "linear":
-        return nn.Linear(config.mm_hidden_size, config.hidden_size)
-
-    mlp_gelu_match = re.match(r"^mlp(\d+)x_gelu$", projector_type)
-    if mlp_gelu_match:
-        mlp_depth = int(mlp_gelu_match.group(1))
-        modules = [nn.Linear(config.mm_hidden_size, config.hidden_size)]
-        for _ in range(1, mlp_depth):
-            modules.append(nn.GELU())
-            modules.append(nn.Linear(config.hidden_size, config.hidden_size))
-        return nn.Sequential(*modules)
-
-    if projector_type == "identity":
-        return nn.Identity()
-
-    raise ValueError(f"Unknown projector type: {projector_type}")
-
-
-class Mineru2VisionModel:
-    def __init__(self, config):
-        self.config = config
-        self.vision_tower = build_vision_tower(config)
-        self.mm_projector = build_vision_projector(config)
-        self.image_processor = Mineru2ImageProcessor()
-
-        # Set device and dtype for inference
-        self.device = torch.device("cuda")
-        self.dtype = config.torch_dtype
-        self.vision_tower.to(device=self.device, dtype=self.dtype).eval()
-        self.mm_projector.to(device=self.device, dtype=self.dtype).eval()
-
-    @torch.no_grad()
-    def get_vision_feature(self, images: list[Image.Image]):
-        # Preprocess images using the specific logic of Mineru2
-        processed_output = self.image_processor.preprocess(images, return_tensors="pt")
-        pixel_values = processed_output["pixel_values"]
-        image_sizes = processed_output.get("image_sizes", None)  # Important for anyres
-
-        # If images are processed into a list of tensors (e.g., anyres), handle them one by one
-        if isinstance(pixel_values, list):
-            image_features_list = []
-            for image_tensor in pixel_values:
-                image_tensor = image_tensor.to(device=self.device, dtype=self.dtype)
-                features = self.vision_tower(image_tensor)
-                projected_features = self.mm_projector(features)
-                image_features_list.append(projected_features)
-
-            # The return value expected by LightLLM should be a list of tensors and sizes
-            return image_features_list, image_sizes
-
-        # If images are batched into a single tensor
-        else:
-            pixel_values = pixel_values.to(device=self.device, dtype=self.dtype)
-            image_features = self.vision_tower(pixel_values)
-            projected_features = self.mm_projector(image_features)
-
-            # Since input is a list, output should also be a list of features for each image
-            return [f for f in projected_features], image_sizes
