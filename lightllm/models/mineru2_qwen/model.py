@@ -7,7 +7,7 @@ from .layer_weights.pre_and_post_layer_weight import Mineru2QwenPreAndPostLayerW
 from .layer_infer.pre_layer_infer import Mineru2QwenPreLayerInfer
 
 
-@ModelRegistry.register("mineru2_qwen", "proxy")
+@ModelRegistry("mineru2_qwen", is_multimodal=True)
 class Mineru2QwenForCausalLM(Qwen2TpPartModel):
     def __init__(self, kvargs):
         super().__init__(kvargs)
