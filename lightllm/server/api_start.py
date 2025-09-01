@@ -408,6 +408,7 @@ def pd_master_start(args):
         f"{get_lightllm_gunicorn_keep_alive()}",
     ]
 
+    setproctitle.setproctitle(f"lightllm::{get_unique_server_name()}::pd_master")
     http_server_process = subprocess.Popen(command)
 
     if args.health_monitor:
@@ -450,6 +451,7 @@ def config_server_start(args):
         f"{get_lightllm_gunicorn_keep_alive()}",
     ]
 
+    setproctitle.setproctitle(f"lightllm::{get_unique_server_name()}::config_server")
     http_server_process = subprocess.Popen(command)
     setup_signal_handlers(http_server_process, process_manager)
     http_server_process.wait()
