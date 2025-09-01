@@ -14,6 +14,7 @@ from lightllm.server.pd_io_struct import KVMoveTask, PDTransJoinInfo, PDTransLea
 from lightllm.utils.device_utils import kv_trans_use_p2p
 from lightllm.utils.graceful_utils import graceful_registry
 from lightllm.distributed.pynccl import StatelessP2PProcessGroup, PyNcclCommunicator
+from lightllm.utils.envs_utils import get_unique_server_name
 
 
 logger = init_logger(__name__)
@@ -104,7 +105,9 @@ def _init_env(
     torch.backends.cudnn.enabled = False
 
     dp_size_in_node = max(1, args.dp // args.nnodes)
-    setproctitle.setproctitle(f"lightllm::prefill_trans:Device{device_id}_DpSizeInNode{dp_size_in_node}")
+    setproctitle.setproctitle(
+        f"lightllm::{get_unique_server_name()}::prefill_trans:Device{device_id}_DpSizeInNode{dp_size_in_node}"
+    )
 
     try:
         torch.cuda.set_device(device_id)

@@ -367,7 +367,7 @@ def _init_env(args, info_queue: mp.Queue, mem_queues: List[mp.Queue], event: mp.
 
     # 注册graceful 退出的处理
     graceful_registry(inspect.currentframe().f_code.co_name)
-    setproctitle.setproctitle(f"lightllm::decode_kv_move_manager:{args.port}")
+    setproctitle.setproctitle(f"lightllm::{get_unique_server_name()}::decode_kv_move_manager")
 
     manager = DecodeKVMoveManager(args, info_queue, mem_queues)
     t = ThreadedServer(manager, port=args.pd_decode_rpyc_port, protocol_config={"allow_pickle": True})

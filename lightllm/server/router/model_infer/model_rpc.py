@@ -28,6 +28,7 @@ from lightllm.server.core.objs.start_args_type import StartArgs
 from lightllm.utils.log_utils import init_logger
 from lightllm.utils.graceful_utils import graceful_registry
 from lightllm.utils.process_check import start_parent_check_thread
+from lightllm.utils.envs_utils import get_unique_server_name
 
 logger = init_logger(__name__)
 
@@ -208,7 +209,9 @@ def _init_env(
 
     # 注册graceful 退出的处理
     graceful_registry(inspect.currentframe().f_code.co_name)
-    setproctitle.setproctitle(f"lightllm::model_infer:MODE{args.run_mode}_RANK{rank}_RANK_IN_NODE{rank_in_node}")
+    setproctitle.setproctitle(
+        f"lightllm::{get_unique_server_name()}::model_infer:MODE{args.run_mode}_RANK{rank}_RANK_IN_NODE{rank_in_node}"
+    )
     start_parent_check_thread()
 
     # 将调度锁注册到全局的共享变量中

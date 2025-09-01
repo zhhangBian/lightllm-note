@@ -339,7 +339,7 @@ def normal_or_p_d_start(args):
     ]
 
     # 启动子进程
-    setproctitle.setproctitle(f"lightllm::api_server:{args.port}")
+    setproctitle.setproctitle(f"lightllm::{get_unique_server_name()}::api_server:{args.port}")
     http_server_process = subprocess.Popen(command)
 
     if "s3://" in args.model_dir:

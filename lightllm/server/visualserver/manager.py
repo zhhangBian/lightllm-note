@@ -16,6 +16,7 @@ from .model_infer.model_rpc import start_model_process, VisualModelRpcClient
 from lightllm.utils.log_utils import init_logger
 from lightllm.utils.graceful_utils import graceful_registry
 from lightllm.utils.process_check import start_parent_check_thread
+from lightllm.utils.envs_utils import get_unique_server_name
 from rpyc.utils.classic import obtain
 
 
@@ -179,7 +180,7 @@ class VisualManager:
 def start_visual_process(args, next_module_port, visual_port, cache_port, model_rpc_ports, pipe_writer):
     # 注册graceful 退出的处理
     graceful_registry(inspect.currentframe().f_code.co_name)
-    setproctitle.setproctitle(f"lightllm::visual_server:{visual_port}")
+    setproctitle.setproctitle(f"lightllm::{get_unique_server_name()}::visual_server")
     start_parent_check_thread()
     try:
         visualserver = VisualManager(args, next_module_port, visual_port, cache_port, model_rpc_ports)
