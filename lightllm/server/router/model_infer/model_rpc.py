@@ -210,7 +210,7 @@ def _init_env(
     # 注册graceful 退出的处理
     graceful_registry(inspect.currentframe().f_code.co_name)
     setproctitle.setproctitle(
-        f"lightllm::{get_unique_server_name()}::model_infer:MODE{args.run_mode}_RANK{rank}_RANK_IN_NODE{rank_in_node}"
+        f"lightllm::{get_unique_server_name()}::model_infer:RANK{rank}"
     )
     start_parent_check_thread()
 
