@@ -4,7 +4,6 @@ import time
 import uuid
 import subprocess
 import signal
-import setproctitle
 from lightllm.utils.net_utils import alloc_can_use_network_port, PortLocker
 from lightllm.utils.start_utils import process_manager, kill_recursive
 from .metrics.manager import start_metric_manager
@@ -95,7 +94,7 @@ def normal_or_p_d_start(args):
 
     if args.graph_max_len_in_batch == 0:
         args.graph_max_len_in_batch = args.max_req_total_len
-
+    
     # mode setting check.
     if args.output_constraint_mode != "none":
         assert args.disable_dynamic_prompt_cache is False
@@ -339,7 +338,6 @@ def normal_or_p_d_start(args):
     ]
 
     # 启动子进程
-    setproctitle.setproctitle(f"lightllm::{get_unique_server_name()}::api_server:{args.port}")
     http_server_process = subprocess.Popen(command)
 
     if "s3://" in args.model_dir:
@@ -408,7 +406,6 @@ def pd_master_start(args):
         f"{get_lightllm_gunicorn_keep_alive()}",
     ]
 
-    setproctitle.setproctitle(f"lightllm::{get_unique_server_name()}::pd_master")
     http_server_process = subprocess.Popen(command)
 
     if args.health_monitor:
@@ -451,7 +448,6 @@ def config_server_start(args):
         f"{get_lightllm_gunicorn_keep_alive()}",
     ]
 
-    setproctitle.setproctitle(f"lightllm::{get_unique_server_name()}::config_server")
     http_server_process = subprocess.Popen(command)
     setup_signal_handlers(http_server_process, process_manager)
     http_server_process.wait()
