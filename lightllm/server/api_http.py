@@ -25,6 +25,7 @@ import base64
 import os
 from io import BytesIO
 import pickle
+import setproctitle
 
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 import ujson as json
@@ -82,7 +83,9 @@ class G_Objs:
         else:
             self.g_generate_func = lightllm_generate
             self.g_generate_stream_func = lightllm_generate_stream
-
+        
+        setproctitle.setproctitle(f"lightllm::{get_unique_server_name()}::api_server")
+        
         if args.run_mode == "pd_master":
             self.metric_client = MetricClient(args.metric_port)
             self.httpserver_manager = HttpServerManagerForPDMaster(
