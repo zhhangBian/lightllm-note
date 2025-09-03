@@ -18,32 +18,34 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from .configuration_mineru2 import Mineru2QwenConfig
 from .image_processing_mineru2 import Mineru2ImageProcessor, get_anyres_image_grid_shape
 from lightllm.server.multimodal_params import ImageItem
+from lightllm.server.embed_cache.utils import read_shm, get_shm_name_data
 
 
 class SiglipVisionTower(nn.Module):
-    def __init__(self, vision_tower_path):
+    def __init__(self, kvargs, mm_vision_tower):
         super().__init__()
 
-        self.config = SiglipVisionConfig.from_pretrained(vision_tower_path)
+        self.vision_tower_path = kvargs["vision_tower_path"]
+        self.config = SiglipVisionConfig.from_pretrained(self.vision_tower_path)
         assert isinstance(self.config, SiglipVisionConfig)
         self.config.num_hidden_layers -= 1  # drop the last hidden layer
         self.config.vision_use_head = False
 
-        self.vision_tower = SiglipVisionModel.from_pretrained(vision_tower_path, config=self.config)
+    def load_model(self, weight_dir):
+        self.vision_tower = SiglipVisionModel.from_pretrained(self.vision_tower_path, config=self.config)
         self.vision_tower.requires_grad_(False)
-
         self.image_processor = Mineru2ImageProcessor()
 
     def encode(self, images: List[ImageItem]):
         img_tensors = []
-        uuids = []
-        valid_id = 0
         valid_ids = []
+        valid_id = 0
+        uuids = []
 
         for i, img in enumerate(images):
             if isinstance(img, ImageItem):
                 uuids.append(img.uuid)
-                image_data = img._preload_data
+                image_data = read_shm(get_shm_name_data(img.uuid))
                 image_data = Image.open(BytesIO(image_data)).convert("RGB")
                 processed = self.image_processor.preprocess(image_data, return_tensors="pt")
                 t = processed["pixel_values"]
@@ -74,12 +76,6 @@ class SiglipVisionTower(nn.Module):
     def cuda(self):
         self.vision_tower = self.vision_tower.cuda()
         return self
-
-    # 新增方法以兼容 lightllm
-    def load_model(self, weight_dir):
-        # 权重已在 __init__ 中加载，这里无需额外操作
-        print("Mineru2 Vision Tower weights already loaded.")
-        pass
 
     @property
     def dummy_feature(self):
@@ -112,10 +108,10 @@ class SiglipVisionTower(nn.Module):
         return self.config.image_size
 
 
-def build_vision_tower(config: Mineru2QwenConfig, vision_tower_path: str):
-    if "siglip" in vision_tower_path.lower():
-        return SiglipVisionTower(vision_tower_path)
-    raise ValueError(f"Unknown vision tower: {vision_tower_path}")
+def build_vision_tower(config: Mineru2QwenConfig, kvargs):
+    if "siglip" in kvargs["vision_tower_path"].lower():
+        return SiglipVisionTower(kvargs)
+    raise ValueError(f"Unknown vision tower: {kvargs['vision_tower_path']}")
 
 
 def build_vision_projector(config: Mineru2QwenConfig):
@@ -142,10 +138,10 @@ def build_vision_projector(config: Mineru2QwenConfig):
 class Mineru2QwenModel(Qwen2Model):
     config_class = Mineru2QwenConfig
 
-    def __init__(self, config: Mineru2QwenConfig):
+    def __init__(self, config: Mineru2QwenConfig, kvargs):
         super(Mineru2QwenModel, self).__init__(config)
 
-        self.vision_tower = build_vision_tower(config, config.mm_vision_tower)
+        self.vision_tower = build_vision_tower(config, kvargs)
         self.mm_projector = build_vision_projector(config)
 
         if "unpad" in getattr(config, "mm_patch_merge_type", ""):
@@ -155,10 +151,10 @@ class Mineru2QwenModel(Qwen2Model):
 class Mineru2QwenForCausalLM(Qwen2ForCausalLM):
     config_class = Mineru2QwenConfig
 
-    def __init__(self, config: Mineru2QwenConfig):
-        super(Qwen2ForCausalLM, self).__init__(config)
+    def __init__(self, config: Mineru2QwenConfig, kvargs):
+        super(Mineru2QwenForCausalLM, self).__init__(config)
         config.rope_scaling = None
-        self.model = Mineru2QwenModel(config)
+        self.model = Mineru2QwenModel(config, kvargs)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
         self.ignore_index = config.ignore_index

@@ -153,25 +153,6 @@ def process_anyres_image(image, processor, grid_pinpoints):
     return torch.stack(image_patches, dim=0)
 
 
-def process_images(images, image_processor, model_cfg):
-    image_aspect_ratio = getattr(model_cfg, "image_aspect_ratio", "")
-    new_images = []
-    if image_aspect_ratio == "pad":
-        for image in images:
-            image = expand2square(image, tuple(int(x * 255) for x in image_processor.image_mean))
-            image = image_processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
-            new_images.append(image)
-    elif image_aspect_ratio == "anyres" or "anyres_max" in image_aspect_ratio:
-        for image in images:
-            image = process_anyres_image(image, image_processor, model_cfg.image_grid_pinpoints)
-            new_images.append(image)
-    else:
-        return image_processor(images, return_tensors="pt")["pixel_values"]
-    if all(x.shape == new_images[0].shape for x in new_images):
-        new_images = torch.stack(new_images, dim=0)
-    return new_images
-
-
 class Mineru2ImageProcessor(BaseImageProcessor):
     model_input_names = ["pixel_values"]
 

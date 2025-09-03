@@ -75,8 +75,7 @@ class VisualModelRpcServer(rpyc.Service):
             elif self.model_type == "gemma3":
                 self.model = Gemma3VisionModel()
             elif self.model_type == "mineru2_qwen":
-                vision_tower_path = os.path.join(weight_dir, model_cfg.get("mm_vision_tower"))
-                self.model = Mineru2VisionModel(vision_tower_path)
+                self.model = Mineru2VisionModel(kvargs, model_cfg["mm_vision_tower"])
             else:
                 raise Exception(f"can not support {self.model_type} now")
 
