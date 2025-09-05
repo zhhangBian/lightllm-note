@@ -71,12 +71,18 @@ class Mineru2VisionModel:
         pass
 
     def load_model(self, weight_dir):
+        print(f"[debug] load_model: {weight_dir}")
         # config_file = os.path.join(weight_dir, "config.json")
         vision_config = Mineru2QwenConfig.from_pretrained(weight_dir)
 
         self.vision_tower = build_vision_tower(vision_config)
         self.projector = build_vision_projector(vision_config)
         self.image_processor = Mineru2ImageProcessor()
+
+    def cuda(self):
+        self.vision_tower = self.vision_tower.cuda()
+        self.projector = self.projector.cuda()
+        return self
 
     def forward(self, x):
         return self.projector(self.vision_tower(x))
@@ -90,6 +96,7 @@ class Mineru2VisionModel:
         for i, img in enumerate(images):
             if isinstance(img, ImageItem):
                 uuids.append(img.uuid)
+                print(f"[debug] read_shm: {get_shm_name_data(img.uuid)}")
                 image_data = read_shm(get_shm_name_data(img.uuid))
                 image_data = Image.open(BytesIO(image_data)).convert("RGB")
                 t = self.image_processor.preprocess(image_data, return_tensors="pt")["pixel_values"]
