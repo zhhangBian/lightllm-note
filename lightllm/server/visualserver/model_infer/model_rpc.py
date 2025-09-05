@@ -18,7 +18,7 @@ from lightllm.server.multimodal_params import MultimodalParams, ImageItem
 from lightllm.models.qwen2_vl.qwen2_visual import Qwen2VisionTransformerPretrainedModel
 from lightllm.models.qwen2_5_vl.qwen2_5_visual import Qwen2_5_VisionTransformerPretrainedModel
 from lightllm.models.tarsier2.tarsier2_visual import TarsierVisionTransformerPretrainedModel
-from lightllm.models.mineru2_qwen.modeling_mineru2 import SiglipVisionTower as Mineru2VisionModel
+from lightllm.models.mineru2_qwen.mineru2_visual import SiglipVisionTower
 from lightllm.server.embed_cache.utils import tensor2bytes, read_shm, create_shm, get_shm_name_data, get_shm_name_embed
 from lightllm.utils.infer_utils import set_random_seed
 from lightllm.utils.infer_utils import calculate_time, mark_start, mark_end
@@ -75,7 +75,7 @@ class VisualModelRpcServer(rpyc.Service):
             elif self.model_type == "gemma3":
                 self.model = Gemma3VisionModel()
             elif self.model_type == "mineru2_qwen":
-                self.model = Mineru2VisionModel(kvargs, model_cfg["mm_vision_tower"])
+                self.model = SiglipVisionTower(kvargs)
             else:
                 raise Exception(f"can not support {self.model_type} now")
 
@@ -92,6 +92,7 @@ class VisualModelRpcServer(rpyc.Service):
         set_random_seed(2147483647)
         return
 
+    # forward实际上就是调用encode函数
     # @calculate_time(show=True, min_cost_ms=150)
     @torch.no_grad()
     def forward(self, images: List[ImageItem]):
@@ -103,6 +104,7 @@ class VisualModelRpcServer(rpyc.Service):
         all_img_embeds, uuids, valid_ids = self.forward(images)
         all_img_embeds = all_img_embeds.to(torch.device("cpu"))
 
+        # 如果tp_rank_id为0，则将推理结果写入cache
         if self.tp_rank_id == 0:
             ready_flags = obtain(self.cache_client.root.get_items_embed(uuids))
             ids_to_set = []
@@ -153,6 +155,7 @@ class VisualModelRpcClient:
         else:
             return
 
+    # 对图片进行推理
     async def encode(self, images: List[ImageItem]):
         ans = self._encode(images)
         if self.use_rpc:

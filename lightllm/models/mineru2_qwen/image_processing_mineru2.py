@@ -1,5 +1,4 @@
 import ast
-import math
 import re
 from functools import partial, reduce
 from typing import Dict, Optional, Union
@@ -94,33 +93,6 @@ def get_anyres_image_grid_shape(image_size, grid_pinpoints, patch_size):
     return width // patch_size, height // patch_size
 
 
-# This functions is not used.
-def resize_and_pad_image(image, target_resolution):
-    original_width, original_height = image.size
-    target_width, target_height = target_resolution
-
-    scale_w = target_width / original_width
-    scale_h = target_height / original_height
-
-    if scale_w < scale_h:
-        new_width = target_width
-        new_height = min(math.ceil(original_height * scale_w), target_height)
-    else:
-        new_height = target_height
-        new_width = min(math.ceil(original_width * scale_h), target_width)
-
-    # Resize the image
-    resized_image = image.resize((new_width, new_height))
-
-    new_image = Image.new("RGB", (target_width, target_height), (0, 0, 0))
-    paste_x = (target_width - new_width) // 2
-    paste_y = (target_height - new_height) // 2
-    new_image.paste(resized_image, (paste_x, paste_y))
-
-    return new_image
-
-
-# DIFFERENT from sglang.srt.mm_utils.process_anyres_image
 def process_anyres_image(image, processor, grid_pinpoints):
     if isinstance(grid_pinpoints, str) and "x" in grid_pinpoints:
         patch_size = processor.crop_size["height"]
