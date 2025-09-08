@@ -410,13 +410,9 @@ class HttpServerManager:
                 await self._alloc_multimodal_resources(multimodal_params, sampling_params)
                 print(f"[debug] _encode: {prompt}, multimodal_params: {multimodal_params.to_dict()}")
                 print(f"[debug] model_name: {self.args.model_name}, model_path: {self.args.model_dir}")
-                if "mineru2" in self.args.model_name.lower():
-                    print("[debug] use mineru2 encode")
-                    prompt_ids = self.tokenizer.encode(
-                        prompt, multimodal_params, add_special_tokens=sampling_params.add_special_tokens
-                    )
-                else:
-                    prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=sampling_params.add_special_tokens)
+                prompt_ids = self.tokenizer.encode(
+                    prompt, multimodal_params, add_special_tokens=sampling_params.add_special_tokens
+                )
             else:
                 prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=sampling_params.add_special_tokens)
             return prompt_ids

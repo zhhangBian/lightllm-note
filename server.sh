@@ -10,7 +10,7 @@ curl http://127.0.0.1:8081/generate \
     -d '{
           "inputs": "What is AI?",
           "parameters":{
-            "max_new_tokens":17,
+            "max_new_tokens":128,
             "frequency_penalty":1
           }
         }'
