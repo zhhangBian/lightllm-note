@@ -81,7 +81,6 @@ class HttpServerManager:
                 )
 
         self.enable_multimodal = enable_multimodal
-        print(f"[debug] enable_multimodal: {self.enable_multimodal}")
         if self.enable_multimodal:
             self.cache_client = rpyc.connect("localhost", cache_port, config={"allow_pickle": True})
             self.send_to_visual = context.socket(zmq.PUSH)
@@ -94,7 +93,6 @@ class HttpServerManager:
         self.recv_from_detokenization.setsockopt(zmq.SUBSCRIBE, b"")
 
         self.tokenizer = get_tokenizer(args.model_dir, args.tokenizer_mode, trust_remote_code=args.trust_remote_code)
-        print(f"[debug] tokenizer: {self.tokenizer}")
 
         self.req_id_to_out_inf: Dict[int, ReqStatus] = {}  # value type (out_str, metadata, finished, event)
         self.forwarding_queue: AsyncQueue = None  # p d 分离模式使用的转发队列, 需要延迟初始化
@@ -128,7 +126,6 @@ class HttpServerManager:
 
             uid_list = []
             for item, rec in zip(items, records):
-                print(f"[debug] alloc_resource: {rec}")
                 item.uuid = rec["id"]
                 item.token_id = rec["token_id"]
                 item.token_num = rec["token_num"]
@@ -147,7 +144,6 @@ class HttpServerManager:
             return
 
     async def _alloc_multimodal_resources(self, multimodal_params: MultimodalParams, sampling_params: SamplingParams):
-        print(f"[debug] alloc_multimodal_resources: {multimodal_params.to_dict()}")
         # 只有 P 和 NORMAL 节点需要真的管理多模态资源
         if self.pd_mode.is_P_or_NORMAL():
             # 这里的锁是为了 防止多个含有多张图片的请求 同时申请的record数量 大于cache_capacity，从而造成死锁的问题。
@@ -160,7 +156,6 @@ class HttpServerManager:
                     data = img.read()
                     # must after init_imageitem_extral_params
                     token_num = self.tokenizer.get_image_token_length(img)
-                    print(f"[debug] img token_num: {token_num}")
                     md5sum = hashlib.md5(data).hexdigest() + "_" + str(hash(frozendict(img.extra_params)))
                     md5sums.append(md5sum)
                     tokens_nums.append(token_num)
@@ -506,7 +501,6 @@ class HttpServerManager:
 
         if self.pd_mode == NodeRole.NORMAL:
             if self.enable_multimodal:
-                print(f"[debug] send_to_visual: {group_req_objs.to_group_req_index()}")
                 self.send_to_visual.send_pyobj(
                     group_req_objs.to_group_req_index(),
                     protocol=pickle.HIGHEST_PROTOCOL,

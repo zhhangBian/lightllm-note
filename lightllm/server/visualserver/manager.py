@@ -121,7 +121,6 @@ class VisualManager:
                 while len(self.waiting_reqs) > 0:
                     # 得到一个请求
                     group_req_indexes = self.waiting_reqs.pop(0)
-                    print(f"[debug] loop_for_fwd group_req_indexes: {group_req_indexes}")
                     shm_req = self.shm_req_manager.get_req_obj_by_index(group_req_indexes.shm_req_indexes[0])
                     is_aborted = shm_req.is_aborted
                     # 将请求放回请求管理器
@@ -138,7 +137,6 @@ class VisualManager:
 
                     # 管理相应的请求数据
                     img_uuids = [img.uuid for img in multimodal_params.images]
-                    print(f"[debug] loop_for_fwd img_uuids: {img_uuids}")
                     # 获取相应的数据
                     ready_image = obtain(self.cache_client.root.get_items_embed(img_uuids))
 
@@ -182,7 +180,6 @@ class VisualManager:
                 # 接受相应的请求
                 for _ in range(self.visual_recv_max_count):
                     recv_req: GroupReqIndexes = self.recv_from_httpserver.recv_pyobj(zmq.NOBLOCK)
-                    print(f"[debug] loop_for_netio_req recv_req: {recv_req}")
                     if isinstance(recv_req, GroupReqIndexes):
                         self.waiting_reqs.append(recv_req)
                     else:
