@@ -85,7 +85,9 @@ class Mineru2VisionModel:
         return self
 
     def forward(self, x):
-        return self.projector(self.vision_tower(x))
+        vision_out = self.vision_tower(x)
+        pooled = vision_out.pooler_output
+        return self.projector(pooled)
 
     def encode(self, images: List[ImageItem]):
         img_tensors = []
@@ -112,6 +114,7 @@ class Mineru2VisionModel:
             return None
 
         img = torch.cat(img_tensors, dim=0)
+        img = img.cuda()
         all_img_embeds = self.forward(img)
 
         return all_img_embeds, uuids, valid_ids

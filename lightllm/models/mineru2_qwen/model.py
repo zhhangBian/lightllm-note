@@ -54,10 +54,27 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
 
     # only change the impl of the encode func:
     def encode(self, prompt, multimodal_params: MultimodalParams = None, add_special_tokens: bool = True):
+        image_token_id = getattr(self, "image_token_index", 151646)
+        image_token = self.image_token
 
-        origin_ids = self.tokenizer.encode(prompt)
+        text_parts = prompt.split(image_token)
+        token_ids = []
+        image_offsets = []
+        offset = 0
+        for i, part in enumerate(text_parts):
+            part_ids = self.tokenizer.encode(part, add_special_tokens=(add_special_tokens if i == 0 else False))
+            token_ids.extend(part_ids)
+            offset += len(part_ids)
+            if i < len(text_parts) - 1:
+                token_ids.append(image_token_id)
+                image_offsets.append(offset)
+                offset += 1
 
-        return origin_ids
+        # 记录image_offsets方便后处理
+        if multimodal_params is not None:
+            multimodal_params.image_offsets = image_offsets
+            # multimodal_params.image_pad_len 可在后处理时补充
+        return token_ids
 
 
 @ModelRegistry("mineru2_qwen", is_multimodal=True)
