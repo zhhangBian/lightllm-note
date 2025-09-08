@@ -76,6 +76,7 @@ def get_tokenizer(
 
     model_cfg, _ = PretrainedConfig.get_config_dict(tokenizer_name)
     model_type = model_cfg.get("model_type", "")
+    print(f"[debug] model_type: {model_type}")
     if model_cfg["architectures"][0] == "TarsierForConditionalGeneration":
         from ..models.qwen2_vl.vision_process import Qwen2VLImageProcessor
 

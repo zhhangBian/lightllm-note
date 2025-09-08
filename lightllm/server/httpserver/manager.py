@@ -94,6 +94,7 @@ class HttpServerManager:
         self.recv_from_detokenization.setsockopt(zmq.SUBSCRIBE, b"")
 
         self.tokenizer = get_tokenizer(args.model_dir, args.tokenizer_mode, trust_remote_code=args.trust_remote_code)
+        print(f"[debug] tokenizer: {self.tokenizer}")
 
         self.req_id_to_out_inf: Dict[int, ReqStatus] = {}  # value type (out_str, metadata, finished, event)
         self.forwarding_queue: AsyncQueue = None  # p d 分离模式使用的转发队列, 需要延迟初始化
@@ -115,6 +116,7 @@ class HttpServerManager:
         self.latest_success_infer_time_mark.set_value(int(time.time()))
         return
 
+    # 唯一的一处给img id
     async def _alloc_resource(self, items, md5sums, token_nums, datas):
 
         while True:
@@ -126,6 +128,7 @@ class HttpServerManager:
 
             uid_list = []
             for item, rec in zip(items, records):
+                print(f"[debug] alloc_resource: {rec}")
                 item.uuid = rec["id"]
                 item.token_id = rec["token_id"]
                 item.token_num = rec["token_num"]
@@ -144,6 +147,7 @@ class HttpServerManager:
             return
 
     async def _alloc_multimodal_resources(self, multimodal_params: MultimodalParams, sampling_params: SamplingParams):
+        print(f"[debug] alloc_multimodal_resources: {multimodal_params.to_dict()}")
         # 只有 P 和 NORMAL 节点需要真的管理多模态资源
         if self.pd_mode.is_P_or_NORMAL():
             # 这里的锁是为了 防止多个含有多张图片的请求 同时申请的record数量 大于cache_capacity，从而造成死锁的问题。
@@ -273,6 +277,7 @@ class HttpServerManager:
                 original_multimodal_params = copy.deepcopy(multimodal_params)
 
             if self.pd_mode.is_P_or_NORMAL():
+                print(f"[debug] generate verify_and_preload: {multimodal_params.to_dict()}")
                 await multimodal_params.verify_and_preload(request)
 
             # 记录请求到达的相关信息
@@ -284,7 +289,9 @@ class HttpServerManager:
                 sampling_params: {sampling_params.to_dict()}, \
                 multimodal_params: {multimodal_params.to_dict()}"
             )
+            # 给img id
             prompt_ids = await self._encode(prompt, multimodal_params, sampling_params)
+            print(f"[debug] generate prompt_ids: {prompt_ids}")
             prompt_tokens = len(prompt_ids)
             # 监控
             if group_request_id > 0:
@@ -394,17 +401,22 @@ class HttpServerManager:
         self, prompt: Union[str, List[int]], multimodal_params: MultimodalParams, sampling_params: SamplingParams
     ):
         if isinstance(prompt, str):
-            if self.enable_multimodal and not ("mineru2" in self.tokenizer.name_or_path.lower()):
+            if self.enable_multimodal:
                 assert (
                     len(multimodal_params.images + multimodal_params.audios) <= self.args.cache_capacity
                 ), "too many multimodal items!"
                 if multimodal_params.audios:
                     assert self.args.enable_multimodal_audio, "audio multimodal not enabled"
                 await self._alloc_multimodal_resources(multimodal_params, sampling_params)
-                print(f"[debug] prompt: {prompt}, multimodal_params: {multimodal_params.to_dict()}")
-                prompt_ids = self.tokenizer.encode(
-                    prompt, multimodal_params, add_special_tokens=sampling_params.add_special_tokens
-                )
+                print(f"[debug] _encode: {prompt}, multimodal_params: {multimodal_params.to_dict()}")
+                print(f"[debug] model_name: {self.args.model_name}, model_path: {self.args.model_dir}")
+                if "mineru2" in self.args.model_name.lower():
+                    print("[debug] use mineru2 encode")
+                    prompt_ids = self.tokenizer.encode(
+                        prompt, multimodal_params, add_special_tokens=sampling_params.add_special_tokens
+                    )
+                else:
+                    prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=sampling_params.add_special_tokens)
             else:
                 prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=sampling_params.add_special_tokens)
             return prompt_ids
@@ -498,6 +510,7 @@ class HttpServerManager:
 
         if self.pd_mode == NodeRole.NORMAL:
             if self.enable_multimodal:
+                print(f"[debug] send_to_visual: {group_req_objs.to_group_req_index()}")
                 self.send_to_visual.send_pyobj(
                     group_req_objs.to_group_req_index(),
                     protocol=pickle.HIGHEST_PROTOCOL,
