@@ -30,16 +30,20 @@ def build_vision_tower(config: Mineru2QwenConfig):
     if "clip" in vision_tower.lower():
         if model_path:
             vision_config = CLIPVisionConfig.from_pretrained(f"{model_path}/{vision_tower}")
+            print(f"[debug] load clip from {model_path}/{vision_tower}")
             return CLIPVisionModel(vision_config)
         else:
             vision_config = CLIPVisionConfig.from_pretrained(vision_tower)
+            print(f"[debug] load clip from {vision_tower}")
             return CLIPVisionModel(vision_config)
     elif "siglip" in vision_tower.lower():
         if model_path:
             vision_config = SiglipVisionConfig.from_pretrained(f"{model_path}/{vision_tower}")
+            print(f"[debug] load siglip from {model_path}/{vision_tower}")
             return SiglipVisionModel(vision_config)
         else:
             vision_config = SiglipVisionConfig.from_pretrained(vision_tower)
+            print(f"[debug] load siglip from {vision_tower}")
             return SiglipVisionModel(vision_config)
     else:
         raise ValueError(f"Unknown vision tower: {model_path}")
@@ -72,7 +76,6 @@ class Mineru2VisionModel:
 
     def load_model(self, weight_dir):
         print(f"[debug] load vision model: {weight_dir}")
-        # config_file = os.path.join(weight_dir, "config.json")
         vision_config = Mineru2QwenConfig.from_pretrained(weight_dir)
 
         self.vision_tower = build_vision_tower(vision_config)
