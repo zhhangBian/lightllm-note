@@ -7,16 +7,31 @@ from lightllm.server.multimodal_params import AudioItem, MultimodalParams, Image
 from lightllm.server.core.objs import SamplingParams
 from lightllm.models.registry import ModelRegistry
 from lightllm.models.qwen2.model import Qwen2TpPartModel
-from lightllm.models.qwen2_vl.vision_process import smart_resize
+from lightllm.models.qwen_vl.layer_infer.pre_layer_infer import LlamaMultimodalPreLayerInfer
+from lightllm.models.internvl.layer_weights.pre_and_post_layer_weight import InternVLLlamaPreAndPostLayerWeight
+from lightllm.models.internvl.img_process import get_image_patch
 
 from ..mineru2_qwen.image_processing_mineru2 import Mineru2ImageProcessor
+from .image_processing_mineru2 import get_anyres_image_grid_shape
+
+IMG_START_TOKEN = "<img>"
+IMG_END_TOKEN = "</img>"
+IMG_TOKEN = "<image>"
 
 
 class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
     def __init__(self, tokenizer, model_cfg):
         super().__init__(tokenizer)
-        self.image_token = model_cfg.get("image_token", "<image>")
-        # for llava-v1.5-7b-hf model
+
+        self.image_token = model_cfg.get("image_token", IMG_TOKEN)
+        self.img_token_index = model_cfg.get("image_token_index", 151646)
+
+        self.image_start_tag = IMG_START_TOKEN
+        self.image_start_id = tokenizer.convert_tokens_to_ids(self.image_start_tag)
+
+        self.image_end_tag = IMG_END_TOKEN
+        self.image_end_id = tokenizer.convert_tokens_to_ids(self.image_end_tag)
+
         if "text_config" in model_cfg:
             patch_size = model_cfg["vision_config"]["patch_size"]
             image_size = model_cfg["vision_config"]["image_size"]
@@ -30,9 +45,12 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
             default_img_size = int(vision_tower_match.group(3))
             image_size = model_cfg.get("img_size", default_img_size)
             image_size = model_cfg.get("mm_image_size", image_size)
-        # (image_size // patch_size) ** 2: (384 // 14) ** 2 = 729
+
+        self.image_processor = Mineru2ImageProcessor(
+            image_aspect_ratio=getattr(model_cfg, "image_aspect_ratio", None),
+            image_grid_pinpoints=getattr(model_cfg, "image_grid_pinpoints", None),
+        )
         self.image_length = (image_size // patch_size) ** 2
-        self.skip_start = model_cfg.get("skip_start", True)
 
     def init_imageitem_extral_params(
         self, img: ImageItem, multi_params: MultimodalParams, sampling_params: SamplingParams
@@ -52,30 +70,47 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
 
     # only change the impl of the encode func:
     def encode(self, prompt, multimodal_params: MultimodalParams = None, add_special_tokens: bool = True):
-        image_token_id = getattr(self, "image_token_index", 151646)
-        image_token = self.image_token
+        # TEXT<image>TEXT<image>TEXT --> TEXT<img></img>TEXT<img></img>TEXT
+        image_tokens = IMG_START_TOKEN + IMG_END_TOKEN
+        if multimodal_params is None:
+            return self.tokenizer.encode(prompt, add_special_tokens=add_special_tokens)
+        image_count = len(multimodal_params.images)
+        prompt = prompt.replace(IMG_TOKEN, image_tokens, image_count)
 
-        text_parts = prompt.split(image_token)
-        token_ids = []
-        image_offsets = []
-        offset = 0
-        for i, part in enumerate(text_parts):
-            part_ids = self.tokenizer.encode(part, add_special_tokens=(add_special_tokens if i == 0 else False))
-            token_ids.extend(part_ids)
-            offset += len(part_ids)
-            if i < len(text_parts) - 1:
-                token_ids.append(image_token_id)
-                image_offsets.append(offset)
-                offset += 1
-
-        # 记录image_offsets方便后处理
-        if multimodal_params is not None:
-            multimodal_params.image_offsets = image_offsets
-            # multimodal_params.image_pad_len 可在后处理时补充
-        return token_ids
+        origin_ids = self.tokenizer.encode(prompt, add_special_tokens=add_special_tokens)
+        # <img></img> --> <img>id,id+1...id+num</img>
+        input_ids = []
+        image_id = 0
+        start_idx = 0
+        while True:
+            try:
+                start_idx = origin_ids.index(self.image_start_id, start_idx)
+                if start_idx + 1 >= len(origin_ids):
+                    break
+                if origin_ids[start_idx + 1] == self.image_end_id:
+                    input_ids.extend(origin_ids[: start_idx + 1])
+                    token_id = multimodal_params.images[image_id].token_id
+                    token_num = multimodal_params.images[image_id].token_num
+                    input_ids.extend(range(token_id, token_id + token_num))
+                    input_ids.append(self.image_end_id)
+                    origin_ids = origin_ids[start_idx + 2 :]
+                    start_idx = 0
+                    image_id += 1
+                else:
+                    raise ValueError("image token error")
+            except ValueError:
+                break
+        input_ids.extend(origin_ids[start_idx:])
+        return input_ids
 
 
 @ModelRegistry("mineru2_qwen", is_multimodal=True)
 class Mineru2QwenForCausalLM(Qwen2TpPartModel):
+    # weight class
+    pre_and_post_weight_class = InternVLLlamaPreAndPostLayerWeight
+
+    # infer class
+    pre_layer_infer_class = LlamaMultimodalPreLayerInfer
+
     def __init__(self, kvargs):
         super().__init__(kvargs)

@@ -126,6 +126,7 @@ class Mineru2VisionModel:
                     print(f"[debug] mineru2_visual unsqueeze t.ndim: {t.ndim}, t.shape: {t.shape}")
                     t = t.unsqueeze(0)
                 img_tensors.append(t)
+                img.token_num = t.shape[0]
             else:
                 raise Exception("Unsupport input types: {} for {}".format(type(img), img))
 
