@@ -122,7 +122,7 @@ class Mineru2VisionModel:
                 if t.ndim == 5:
                     print(f"[debug] mineru2_visual reshape t.ndim: {t.ndim}, t.shape: {t.shape}")
                     t = t.view(-1, t.shape[-3], t.shape[-2], t.shape[-1])
-                elif t.ndim == 3:  # [3, H, W]
+                elif t.ndim == 3:
                     print(f"[debug] mineru2_visual unsqueeze t.ndim: {t.ndim}, t.shape: {t.shape}")
                     t = t.unsqueeze(0)
                 img_tensors.append(t)
