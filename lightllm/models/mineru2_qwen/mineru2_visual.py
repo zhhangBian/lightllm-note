@@ -6,6 +6,7 @@ from PIL import Image
 
 import torch
 import torch.nn as nn
+import numpy as np
 from transformers import (
     CLIPVisionModel,
     CLIPVisionConfig,
@@ -14,7 +15,7 @@ from transformers import (
 )
 
 from .configuration_mineru2 import Mineru2QwenConfig
-from .image_processing_mineru2 import Mineru2ImageProcessor
+from .image_processing_mineru2 import Mineru2ImageProcessor, expand2square, process_anyres_image
 
 from lightllm.server.multimodal_params import ImageItem
 from lightllm.server.embed_cache.utils import read_shm, get_shm_name_data
@@ -80,7 +81,11 @@ class Mineru2VisionModel:
 
         self.vision_tower = build_vision_tower(vision_config)
         self.projector = build_vision_projector(vision_config)
-        self.image_processor = Mineru2ImageProcessor()
+        # 取配置参数传下去
+        self.image_processor = Mineru2ImageProcessor(
+            image_aspect_ratio=getattr(vision_config, "image_aspect_ratio", None),
+            image_grid_pinpoints=getattr(vision_config, "image_grid_pinpoints", None),
+        )
 
     def cuda(self):
         self.vision_tower = self.vision_tower.cuda()
@@ -97,24 +102,44 @@ class Mineru2VisionModel:
         uuids: List[str] = []
         valid_id = 0
         valid_ids: List[List[int]] = []
-
+        image_aspect_ratio = getattr(self.image_processor, "image_aspect_ratio", None)
+        image_grid_pinpoints = getattr(self.image_processor, "image_grid_pinpoints", None)
         for i, img in enumerate(images):
             if isinstance(img, ImageItem):
                 uuids.append(img.uuid)
                 image_data = read_shm(get_shm_name_data(img.uuid))
                 image_data = Image.open(BytesIO(image_data)).convert("RGB")
-                t = self.image_processor.preprocess(image_data, return_tensors="pt")["pixel_values"]
+                if image_aspect_ratio == "pad":
+                    image_proc = expand2square(image_data, tuple(int(x * 255) for x in self.image_processor.image_mean))
+                    t = self.image_processor.preprocess(image_proc, return_tensors="pt")["pixel_values"]
+                elif image_aspect_ratio and (image_aspect_ratio == "anyres" or "anyres_max" in image_aspect_ratio):
+                    t = process_anyres_image(image_data, self.image_processor, image_grid_pinpoints)
+                    if isinstance(t, np.ndarray):
+                        t = torch.from_numpy(t)
+                else:
+                    t = self.image_processor.preprocess(image_data, return_tensors="pt")["pixel_values"]
+
+                if t.ndim == 5:
+                    print(f"[debug] mineru2_visual reshape t.ndim: {t.ndim}, t.shape: {t.shape}")
+                    t = t.view(-1, t.shape[-3], t.shape[-2], t.shape[-1])
+                elif t.ndim == 3:  # [3, H, W]
+                    print(f"[debug] mineru2_visual unsqueeze t.ndim: {t.ndim}, t.shape: {t.shape}")
+                    t = t.unsqueeze(0)
                 img_tensors.append(t)
             else:
                 raise Exception("Unsupport input types: {} for {}".format(type(img), img))
 
-            cur_num = img_tensors[-1].shape[0]
+            cur_num = (
+                img_tensors[-1].shape[0]
+                if isinstance(img_tensors[-1], torch.Tensor) and img_tensors[-1].dim() == 4
+                else 1
+            )
             valid_ids.append([valid_id, valid_id + cur_num])
             valid_id += cur_num
 
         if len(img_tensors) <= 0:
             return None, [], []
-
+        # 保证全部为4维后拼接
         img = torch.cat(img_tensors, dim=0)
         img = img.cuda()
         all_img_embeds = self.forward(img)

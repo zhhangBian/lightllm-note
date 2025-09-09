@@ -93,7 +93,7 @@ def get_anyres_image_grid_shape(image_size, grid_pinpoints, patch_size):
     return width // patch_size, height // patch_size
 
 
-def process_anyres_image(image, processor, grid_pinpoints):
+def process_anyres_image(image, processor: "Mineru2ImageProcessor", grid_pinpoints):
     if isinstance(grid_pinpoints, str) and "x" in grid_pinpoints:
         patch_size = processor.crop_size["height"]
         assert patch_size in [224, 336, 384, 448, 512], "patch_size should be in [224, 336, 384, 448, 512]"
@@ -120,7 +120,7 @@ def process_anyres_image(image, processor, grid_pinpoints):
 
     image_patches = [image_original_resize] + patches
     image_patches = [
-        processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches
+        processor.preprocess([image_patch], return_tensors="pt")["pixel_values"][0] for image_patch in image_patches
     ]
     return torch.stack(image_patches, dim=0)
 
