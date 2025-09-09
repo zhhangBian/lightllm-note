@@ -1,6 +1,6 @@
 import re
 
-from typing import List
+from typing import List, Tuple
 from io import BytesIO
 from PIL import Image
 
@@ -87,16 +87,16 @@ class Mineru2VisionModel:
         self.projector = self.projector.cuda()
         return self
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
         vision_out = self.vision_tower(x)
         pooled = vision_out.pooler_output
         return self.projector(pooled)
 
-    def encode(self, images: List[ImageItem]):
-        img_tensors = []
-        uuids = []
+    def encode(self, images: List[ImageItem]) -> Tuple[torch.Tensor, List[str], List[List[int]]]:
+        img_tensors: List[torch.Tensor] = []
+        uuids: List[str] = []
         valid_id = 0
-        valid_ids = []
+        valid_ids: List[List[int]] = []
 
         for i, img in enumerate(images):
             if isinstance(img, ImageItem):
@@ -113,7 +113,7 @@ class Mineru2VisionModel:
             valid_id += cur_num
 
         if len(img_tensors) <= 0:
-            return None
+            return None, [], []
 
         img = torch.cat(img_tensors, dim=0)
         img = img.cuda()

@@ -34,8 +34,6 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
         self.image_length = (image_size // patch_size) ** 2
         self.skip_start = model_cfg.get("skip_start", True)
 
-        self.image_processor = Mineru2ImageProcessor()
-
     def init_imageitem_extral_params(
         self, img: ImageItem, multi_params: MultimodalParams, sampling_params: SamplingParams
     ):
