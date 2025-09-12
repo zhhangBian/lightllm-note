@@ -47,8 +47,8 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
             image_size = model_cfg.get("mm_image_size", image_size)
 
         self.image_processor = Mineru2ImageProcessor(
-            image_aspect_ratio=getattr(model_cfg, "image_aspect_ratio", None),
-            image_grid_pinpoints=getattr(model_cfg, "image_grid_pinpoints", None),
+            image_aspect_ratio=(model_cfg.get("image_aspect_ratio", None)),
+            image_grid_pinpoints=(model_cfg.get("image_grid_pinpoints", None)),
         )
         self.image_length = (image_size // patch_size) ** 2
 
@@ -63,7 +63,27 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
         raise NotImplementedError
 
     def get_image_token_length(self, img: ImageItem):
-        return self.image_length
+        # 对于 Mineru2 集成，视觉塔返回的是每个裁剪的一条 pooled 向量。
+        # token 数应与裁剪数量一致：anyres 模式为 1（原图）+ 网格裁剪数，否则为 1。
+        aspect = getattr(self.image_processor, "image_aspect_ratio", None)
+        try:
+            if aspect and (aspect == "anyres" or (isinstance(aspect, str) and "anyres_max" in aspect)):
+                crop_size = self.image_processor.crop_size["height"]
+                grid_w, grid_h = get_anyres_image_grid_shape(
+                    (img.image_w, img.image_h), self.image_processor.image_grid_pinpoints, crop_size
+                )
+                token_num = int(grid_w * grid_h + 1)
+                print(
+                    f"[debug] mineru2_tokenizer anyres img_size=({img.image_w},{img.image_h}) "
+                    f"crop={crop_size} grid=({grid_w},{grid_h}) token_num={token_num}"
+                )
+                return token_num
+            else:
+                print(f"[debug] mineru2_tokenizer non-anyres token_num=1 aspect={aspect}")
+                return 1
+        except Exception as e:
+            print(f"[debug] mineru2_tokenizer token_num_fallback due to {e}, return 1")
+            return 1
 
     def get_audio_token_length(self, audio: AudioItem):
         raise NotImplementedError

@@ -38,7 +38,7 @@ query = """
 You are a helpful assistant.<|im_end|>
 <|im_start|>user
 <img></img>
-这是什么？<|im_end|>
+这张图片中的文字是什么，告诉我<|im_end|>
 <|im_start|>assistant
 """
 

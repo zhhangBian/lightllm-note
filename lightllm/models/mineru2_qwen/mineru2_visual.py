@@ -125,8 +125,52 @@ class Mineru2VisionModel:
                 elif t.ndim == 3:
                     print(f"[debug] mineru2_visual unsqueeze t.ndim: {t.ndim}, t.shape: {t.shape}")
                     t = t.unsqueeze(0)
+                # 在修改前记录 manager 分配的 token_num
+                try:
+                    print(f"[debug] mineru2_visual manager_token_num_before={img.token_num} uuid={img.uuid}")
+                except Exception:
+                    pass
+                # 对齐实际 K 与期望 token_num
+                expected_k = img.token_num if getattr(img, "token_num", None) is not None else None
+                actual_k = t.shape[0]
+                if expected_k is None or expected_k <= 0:
+                    expected_k = actual_k
+                    print(f"[debug] mineru2_visual expected_k_from_actual uuid={img.uuid} expected_k={expected_k}")
+                if actual_k != expected_k:
+                    if actual_k % expected_k == 0:
+                        factor = actual_k // expected_k
+                        print(
+                            f"[debug] mineru2_visual down_aggregate uuid={img.uuid}"
+                            f" actual_k={actual_k} expected_k={expected_k} factor={factor}"
+                        )
+                        t = t.view(expected_k, factor, t.shape[1], t.shape[2], t.shape[3]).mean(dim=1)
+                    elif expected_k % actual_k == 0:
+                        factor = expected_k // actual_k
+                        print(
+                            f"[debug] mineru2_visual up_repeat uuid={img.uuid}"
+                            f" actual_k={actual_k} expected_k={expected_k} factor={factor}"
+                        )
+                        t = t.repeat_interleave(repeats=factor, dim=0)
+                    else:
+                        k = min(actual_k, expected_k)
+                        print(
+                            f"[debug] mineru2_visual fallback_slice uuid={img.uuid}"
+                            f" actual_k={actual_k} expected_k={expected_k} k={k}"
+                        )
+                        if actual_k >= expected_k:
+                            t = t[:expected_k]
+                        else:
+                            # pad by repeating last
+                            pad = t[-1:].repeat(expected_k - actual_k, 1, 1, 1)
+                            t = torch.cat([t, pad], dim=0)
                 img_tensors.append(t)
-                img.token_num = t.shape[0]
+                # 最终 K
+                final_k = t.shape[0]
+                img.token_num = final_k
+                print(
+                    f"[debug] mineru2_visual actual_k={actual_k} "
+                    f"expected_k={expected_k} final_k={final_k} uuid={img.uuid}"
+                )
             else:
                 raise Exception("Unsupport input types: {} for {}".format(type(img), img))
 
@@ -136,6 +180,10 @@ class Mineru2VisionModel:
                 else 1
             )
             valid_ids.append([valid_id, valid_id + cur_num])
+            print(
+                f"[debug] mineru2_visual valid_ids_append uuid={img.uuid}"
+                f" range=({valid_id},{valid_id + cur_num}) cur_num={cur_num}"
+            )
             valid_id += cur_num
 
         if len(img_tensors) <= 0:
@@ -144,5 +192,6 @@ class Mineru2VisionModel:
         img = torch.cat(img_tensors, dim=0)
         img = img.cuda()
         all_img_embeds = self.forward(img)
+        print(f"[debug] mineru2_visual all_img_embeds.shape={tuple(all_img_embeds.shape)} " f"total_K={img.shape[0]}")
 
         return all_img_embeds, uuids, valid_ids
