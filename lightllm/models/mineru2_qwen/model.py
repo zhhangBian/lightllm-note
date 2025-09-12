@@ -73,12 +73,10 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
                     (img.image_w, img.image_h), self.image_processor.image_grid_pinpoints, crop_size
                 )
                 base = int(grid_w * grid_h + 1)
-                view_factor = 2  # 与 encode 中观测到的 t.shape[1]==2 对齐
-                token_num = base * view_factor
+                token_num = base
                 print(
                     f"[debug] mineru2_tokenizer anyres img_size=({img.image_w},{img.image_h}) "
-                    f"crop={crop_size} grid=({grid_w},{grid_h}) base={base} view_factor={view_factor}"
-                    f" token_num={token_num}"
+                    f"crop={crop_size} grid=({grid_w},{grid_h}) base={base} token_num={token_num}"
                 )
                 return token_num
             else:
@@ -130,7 +128,7 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
 @ModelRegistry("mineru2_qwen", is_multimodal=True)
 class Mineru2QwenForCausalLM(Qwen2TpPartModel):
     # weight class
-    pre_and_post_weight_class = InternVLLlamaPreAndPostLayerWeight
+    # pre_and_post_weight_class = InternVLLlamaPreAndPostLayerWeight
 
     # infer class
     pre_layer_infer_class = LlamaMultimodalPreLayerInfer

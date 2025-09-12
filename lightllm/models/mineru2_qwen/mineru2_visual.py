@@ -41,11 +41,15 @@ def build_vision_tower(config: Mineru2QwenConfig):
         if model_path:
             vision_config = SiglipVisionConfig.from_pretrained(f"{model_path}/{vision_tower}")
             print(f"[debug] load siglip from {model_path}/{vision_tower}")
-            return SiglipVisionModel(vision_config)
         else:
             vision_config = SiglipVisionConfig.from_pretrained(vision_tower)
             print(f"[debug] load siglip from {vision_tower}")
-            return SiglipVisionModel(vision_config)
+        # 对齐ref：去掉最后一层并禁用head
+        if hasattr(vision_config, "num_hidden_layers"):
+            vision_config.num_hidden_layers = max(0, vision_config.num_hidden_layers - 1)
+        if hasattr(vision_config, "vision_use_head"):
+            vision_config.vision_use_head = False
+        return SiglipVisionModel(vision_config)
     else:
         raise ValueError(f"Unknown vision tower: {model_path}")
 
@@ -93,9 +97,11 @@ class Mineru2VisionModel:
         return self
 
     def forward(self, x) -> torch.Tensor:
-        vision_out = self.vision_tower(x)
-        pooled = vision_out.pooler_output
-        return self.projector(pooled)
+        vision_out = self.vision_tower(x, output_hidden_states=True)
+        last_hidden = vision_out.hidden_states[-1]
+        # 对patch维度做平均池化，得到每视图一个向量
+        pooled_per_view = last_hidden.mean(dim=1)
+        return self.projector(pooled_per_view)
 
     def encode(self, images: List[ImageItem]) -> Tuple[torch.Tensor, List[str], List[List[int]]]:
         img_tensors: List[torch.Tensor] = []
