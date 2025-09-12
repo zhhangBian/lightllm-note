@@ -64,7 +64,7 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
 
     def get_image_token_length(self, img: ImageItem):
         # 对于 Mineru2 集成，视觉塔返回的是每个裁剪的一条 pooled 向量。
-        # token 数应与裁剪数量一致：anyres 模式为 1（原图）+ 网格裁剪数，否则为 1。
+        # token 数应与裁剪数量一致：anyres 模式为 1（原图）+ 网格裁剪数，且每块含双视图（factor=2）。
         aspect = getattr(self.image_processor, "image_aspect_ratio", None)
         try:
             if aspect and (aspect == "anyres" or (isinstance(aspect, str) and "anyres_max" in aspect)):
@@ -72,10 +72,13 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
                 grid_w, grid_h = get_anyres_image_grid_shape(
                     (img.image_w, img.image_h), self.image_processor.image_grid_pinpoints, crop_size
                 )
-                token_num = int(grid_w * grid_h + 1)
+                base = int(grid_w * grid_h + 1)
+                view_factor = 2  # 与 encode 中观测到的 t.shape[1]==2 对齐
+                token_num = base * view_factor
                 print(
                     f"[debug] mineru2_tokenizer anyres img_size=({img.image_w},{img.image_h}) "
-                    f"crop={crop_size} grid=({grid_w},{grid_h}) token_num={token_num}"
+                    f"crop={crop_size} grid=({grid_w},{grid_h}) base={base} view_factor={view_factor}"
+                    f" token_num={token_num}"
                 )
                 return token_num
             else:
