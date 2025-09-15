@@ -16,7 +16,8 @@ def run(query, uris):
     data = {
         "inputs": query,
         "parameters": {
-            "max_new_tokens": 200,
+            "max_new_tokens": 128,
+            "ignore_eos": False,
             # The space before <|endoftext|> is important,
             # the server will remove the first bos_token_id,
             # but QWen tokenizer does not has bos_token_id
@@ -38,7 +39,7 @@ query = """
 You are a helpful assistant.<|im_end|>
 <|im_start|>user
 <img></img>
-这张图片中的文字是什么，告诉我<|im_end|>
+这张图片中的内容是什么<|im_end|>
 <|im_start|>assistant
 """
 

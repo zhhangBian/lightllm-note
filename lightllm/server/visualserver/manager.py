@@ -110,6 +110,7 @@ class VisualManager:
                 processing_group_reqs = []
                 images_need_infer = []
                 while len(self.waiting_reqs) > 0:
+                    print(f"[debug] loop_for_fwd waiting_reqs={len(self.waiting_reqs)}")
                     group_req_indexes = self.waiting_reqs.pop(0)
                     shm_req = self.shm_req_manager.get_req_obj_by_index(group_req_indexes.shm_req_indexes[0])
                     is_aborted = shm_req.is_aborted

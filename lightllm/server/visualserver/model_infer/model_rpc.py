@@ -95,6 +95,7 @@ class VisualModelRpcServer(rpyc.Service):
     # @calculate_time(show=True, min_cost_ms=150)
     @torch.no_grad()
     def forward(self, images: List[ImageItem]):
+        print(f"[debug] forward images {len(images)}")
         return self.model.encode(images)
 
     # @calculate_time(show=False, min_cost_ms=300)
