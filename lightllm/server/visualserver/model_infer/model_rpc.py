@@ -92,7 +92,6 @@ class VisualModelRpcServer(rpyc.Service):
         set_random_seed(2147483647)
         return
 
-    # forward实际上就是调用encode函数
     # @calculate_time(show=True, min_cost_ms=150)
     @torch.no_grad()
     def forward(self, images: List[ImageItem]):
@@ -104,7 +103,6 @@ class VisualModelRpcServer(rpyc.Service):
         all_img_embeds, uuids, valid_ids = self.forward(images)
         all_img_embeds = all_img_embeds.to(torch.device("cpu"))
 
-        # 如果tp_rank_id为0，则将推理结果写入cache
         if self.tp_rank_id == 0:
             ready_flags = obtain(self.cache_client.root.get_items_embed(uuids))
             ids_to_set = []
@@ -155,7 +153,6 @@ class VisualModelRpcClient:
         else:
             return
 
-    # 对图片进行推理
     async def encode(self, images: List[ImageItem]):
         ans = self._encode(images)
         if self.use_rpc:
