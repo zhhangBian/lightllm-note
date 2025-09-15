@@ -91,21 +91,22 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
 
     # only change the impl of the encode func:
     def encode(self, prompt, multimodal_params: MultimodalParams = None, add_special_tokens: bool = True):
-        # TEXT<image>TEXT<image>TEXT --> TEXT<img></img>TEXT<img></img>TEXT
-        image_tokens = IMG_START_TOKEN + IMG_END_TOKEN
         if multimodal_params is None:
             return self.tokenizer.encode(prompt, add_special_tokens=add_special_tokens)
+
+        # TEXT<image>TEXT<image>TEXT --> TEXT<img></img>TEXT<img></img>TEXT
+        image_tokens = IMG_START_TOKEN + IMG_END_TOKEN
         image_count = len(multimodal_params.images)
-        prompt = prompt.replace(IMG_TOKEN, image_tokens, image_count)
+        prompt = prompt.replace(image_tokens, IMG_TOKEN, image_count)
 
         origin_ids = self.tokenizer.encode(prompt, add_special_tokens=add_special_tokens)
-        # <img></img> --> <img>id,id+1...id+num</img>
+        # <image>
         input_ids = []
         image_id = 0
         start_idx = 0
         while True:
             try:
-                start_idx = origin_ids.index(self.image_start_id, start_idx)
+                start_idx = origin_ids.index(self.img_token_index, start_idx)
                 if start_idx + 1 >= len(origin_ids):
                     break
                 if origin_ids[start_idx + 1] == self.image_end_id:
@@ -122,6 +123,7 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
             except ValueError:
                 break
         input_ids.extend(origin_ids[start_idx:])
+        print(f"[debug] mineru2_tokenizer input_ids={input_ids}")
         return input_ids
 
 

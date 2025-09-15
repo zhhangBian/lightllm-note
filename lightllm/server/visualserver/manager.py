@@ -33,11 +33,9 @@ class VisualManager:
         visual_model_rpc_ports,
     ):
         context = zmq.Context(2)
-        # 向下一模块（路由服务器或音频服务器）发送数据的 PUSH socket
         self.send_to_next_module = context.socket(zmq.PUSH)  # router or audio server (if --enable_multimodal_audio)
         self.send_to_next_module.connect(f"{args.zmq_mode}127.0.0.1:{next_module_port}")
 
-        # 从 HTTP 服务器接收数据的 PULL socket
         self.recv_from_httpserver = context.socket(zmq.PULL)
         self.recv_from_httpserver.bind(f"{args.zmq_mode}127.0.0.1:{visual_port}")
         self.cache_client = rpyc.connect("localhost", cache_port, config={"allow_pickle": True})
@@ -47,7 +45,6 @@ class VisualManager:
         self.tp_world_size = args.tp
         self.vit_dp = args.visual_dp
         self.vit_tp = args.visual_tp
-        # visual server 的推理 batch size,默认为1
         self.infer_batch_size = args.visual_infer_batch_size
         self.trust_remote_code = args.trust_remote_code
         self.args = args
@@ -58,7 +55,6 @@ class VisualManager:
 
         self.model_rpcs: List[List[VisualModelRpcClient]] = [[] for _ in range(self.vit_dp)]
 
-        # 每个设备启动一个visual manager
         for dp_rank_id in range(self.vit_dp):
             tp_ports_each_dp = self.visual_model_rpc_ports[dp_rank_id]
             for tp_rank_id in range(self.vit_tp):
@@ -69,7 +65,6 @@ class VisualManager:
                 self.model_rpcs[dp_rank_id].append(rpc_model)
 
         init_model_ret = []
-        # 每个设备启动一个visual manager
         for dp_rank_id in range(self.vit_dp):  # async init model process
             for tp_rank_id in range(self.vit_tp):
                 kvargs = {
@@ -92,19 +87,15 @@ class VisualManager:
         await asyncio.gather(*init_model_ret)
         return
 
-    # 对图片进行推理
     async def infer_imgs(self, images: List[ImageItem]):
         if len(images) == 0:
             return
 
         tasks = []
-        # 进行dp方式的推理
         for vit_dp_rank in range(self.vit_dp):
             assigned_images = [images[i] for i in range(vit_dp_rank, len(images), self.vit_dp)]
             if assigned_images:
-                # 进行tp方式的推理
                 for vit_tp_rank in range(self.vit_tp):
-                    # 调用encode函数进行相应的推理
                     task = asyncio.create_task(self.model_rpcs[vit_dp_rank][vit_tp_rank].encode(assigned_images))
                     tasks.append(task)
 
