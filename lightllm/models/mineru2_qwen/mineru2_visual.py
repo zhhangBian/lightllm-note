@@ -27,21 +27,22 @@ from safetensors import safe_open
 logger = init_logger(__name__)
 
 
-def build_vision_tower(config: Mineru2QwenConfig):
+def build_vision_tower(weight_dir: str, config: Mineru2QwenConfig):
     vision_tower = getattr(config, "mm_vision_tower", getattr(config, "vision_tower", ""))
-    model_path = getattr(config, "_name_or_path", "")
+    model_path = os.path.join(weight_dir, vision_tower)
 
-    def _resolve_path(name):
-        if model_path:
-            return f"{model_path}/{name}"
-        return name
+    def _resolve_path():
+        if os.path.exists(model_path):
+            return model_path
+        else:
+            return vision_tower
 
     if "clip" in vision_tower.lower():
-        vt_path = _resolve_path(vision_tower)
+        vt_path = _resolve_path()
         print(f"[debug] load clip from {vt_path}")
         return CLIPVisionModel.from_pretrained(vt_path)
     elif "siglip" in vision_tower.lower():
-        vt_path = _resolve_path(vision_tower)
+        vt_path = _resolve_path()
         print(f"[debug] load siglip from {vt_path}")
         # 方案A：使用配置减层并按该配置实例化模型，再加载权重（忽略不匹配尺寸）
         cfg = SiglipVisionConfig.from_pretrained(vt_path)
@@ -86,25 +87,8 @@ class Mineru2VisionModel:
         pass
 
     def _load_projector_weights(self, weight_dir: str):
-        # 扫描 safetensors/bin 文件并尝试加载 projector 权重
-        def iter_state_dicts(dir_path: str):
-            for f in os.listdir(dir_path):
-                full = os.path.join(dir_path, f)
-                if not os.path.isfile(full):
-                    continue
-                if f.endswith(".safetensors"):
-                    try:
-                        with safe_open(full, framework="pt", device="cpu") as sf:
-                            yield {k: sf.get_tensor(k) for k in sf.keys()}
-                    except Exception as e:
-                        print(f"[warning] safetensors read fail: {full} due to {e}")
-                elif f.endswith(".bin"):
-                    try:
-                        state = torch.load(full, map_location="cpu")
-                        if isinstance(state, dict):
-                            yield state
-                    except Exception as e:
-                        print(f"[warning] bin read fail: {full} due to {e}")
+        projector_weight_path = os.path.join(weight_dir, "model.safetensors")
+        print(f"[debug] load projector weights from {projector_weight_path}")
 
         def assign_linear(linear: nn.Linear, w: torch.Tensor = None, b: torch.Tensor = None):
             if w is not None:
@@ -112,35 +96,43 @@ class Mineru2VisionModel:
             if b is not None and linear.bias is not None:
                 linear.bias.data.copy_(b.to(dtype=linear.bias.dtype))
 
-        def try_assign_from_keydict(key_to_tensor: dict) -> bool:
-            # 兼容命名：
-            # - 线性：model.mm_projector.(weight|bias) / model.mm_projector.linear.(weight|bias)
-            # - 2层MLP：model.mm_projector.{0,2}.(weight|bias)
-            # - LLaVA风格别名：multi_modal_projector.linear_1 / linear_2
+        # 收集 projector Linear 模块（顺序即写入顺序）
+        if isinstance(self.projector, nn.Linear):
+            print(f"[debug] projector type: {type(self.projector)}")
+            linear_modules = [self.projector]
+        elif isinstance(self.projector, nn.Sequential):
+            print(f"[debug] projector type: {type(self.projector)}")
+            linear_modules = [m for m in self.projector if isinstance(m, nn.Linear)]
+        else:
+            print(f"[debug] projector type: {type(self.projector)}")
+            raise RuntimeError(f"Unsupported projector type: {type(self.projector)}")
+
+        def assign_projector_from_state(sd: dict) -> bool:
+            # 单层线性：优先直接匹配整体权重；否则回退到首层
             if len(linear_modules) == 1:
-                w = None
-                b = None
-                for k in ("model.mm_projector.weight", "model.mm_projector.linear.weight"):
-                    if k in key_to_tensor:
-                        w = key_to_tensor[k]
-                        break
-                for k in ("model.mm_projector.bias", "model.mm_projector.linear.bias"):
-                    if k in key_to_tensor:
-                        b = key_to_tensor[k]
-                        break
+                print("[debug] projector load: single Linear matched (model.mm_projector.*)")
+                w = next(
+                    (sd[k] for k in ("model.mm_projector.weight", "model.mm_projector.linear.weight") if k in sd), None
+                )
+                b = next(
+                    (sd[k] for k in ("model.mm_projector.bias", "model.mm_projector.linear.bias") if k in sd), None
+                )
                 if w is not None:
                     assign_linear(linear_modules[0], w, b)
-                    print("[debug] projector load: single Linear matched")
                     return True
-                # 兜底：若权重以分层形式存在，且本地只有一层，则尝试用第一层
-                for k in ("model.mm_projector.0.weight", "multi_modal_projector.linear_1.weight"):
-                    if k in key_to_tensor:
-                        w = key_to_tensor[k]
-                        break
-                for k in ("model.mm_projector.0.bias", "multi_modal_projector.linear_1.bias"):
-                    if k in key_to_tensor:
-                        b = key_to_tensor[k]
-                        break
+                # 兜底：若分层存在，仅取第一层
+                w = next(
+                    (
+                        sd[k]
+                        for k in ("model.mm_projector.0.weight", "multi_modal_projector.linear_1.weight")
+                        if k in sd
+                    ),
+                    None,
+                )
+                b = next(
+                    (sd[k] for k in ("model.mm_projector.0.bias", "multi_modal_projector.linear_1.bias") if k in sd),
+                    None,
+                )
                 if w is not None:
                     assign_linear(linear_modules[0], w, b)
                     print("[debug] projector load: fallback to first layer for single Linear")
@@ -148,9 +140,7 @@ class Mineru2VisionModel:
                 return False
 
             # 多层（如 mlp2x_gelu）：按常见命名逐一匹配
-            assigned = 0
             layer_key_map = [
-                # (idx, weight_keys, bias_keys)
                 (
                     0,
                     ("model.mm_projector.0.weight", "multi_modal_projector.linear_1.weight"),
@@ -162,11 +152,12 @@ class Mineru2VisionModel:
                     ("model.mm_projector.2.bias", "multi_modal_projector.linear_2.bias"),
                 ),
             ]
+            assigned = 0
             for idx, w_keys, b_keys in layer_key_map:
                 if idx >= len(linear_modules):
                     continue
-                w = next((key_to_tensor[k] for k in w_keys if k in key_to_tensor), None)
-                b = next((key_to_tensor[k] for k in b_keys if k in key_to_tensor), None)
+                w = next((sd[k] for k in w_keys if k in sd), None)
+                b = next((sd[k] for k in b_keys if k in sd), None)
                 if w is not None:
                     assign_linear(linear_modules[idx], w, b)
                     assigned += 1
@@ -175,21 +166,56 @@ class Mineru2VisionModel:
                 return True
             return False
 
-        # 收集本地 Linear 模块（顺序即写入顺序）
-        if isinstance(self.projector, nn.Linear):
-            linear_modules = [self.projector]
-        elif isinstance(self.projector, nn.Sequential):
-            linear_modules = [m for m in self.projector if isinstance(m, nn.Linear)]
+        def try_load_vision_tower(sd: dict):
+            # 参考 ref: 去掉前缀 'model.vision_tower.vision_tower.' 进行加载（可选）
+            if not hasattr(self, "vision_tower") or not isinstance(
+                self.vision_tower, (CLIPVisionModel, SiglipVisionModel)
+            ):
+                return False, 0
+            vt_prefix = "model.vision_tower.vision_tower."
+            vt_sd = {k[len(vt_prefix) :]: v for k, v in sd.items() if k.startswith(vt_prefix)}
+            if not vt_sd:
+                return False, 0
+            try:
+                missing, unexpected = self.vision_tower.load_state_dict(vt_sd, strict=False)
+                num = len(vt_sd)
+                print(
+                    f"[debug] vision_tower load: keys={num}"
+                    f" missing={len(missing) if isinstance(missing, (list, tuple)) else 'n/a'}"
+                    f" unexpected={len(unexpected) if isinstance(unexpected, (list, tuple)) else 'n/a'}"
+                )
+                return True, num
+            except Exception as e:
+                print(f"[warning] vision_tower load_state_dict failed (strict=False): {e}")
+                return False, 0
+
+        # 仅从指定文件加载（优先 .safetensors，fallback 到同名 .bin）
+        if os.path.isfile(projector_weight_path) and projector_weight_path.endswith(".safetensors"):
+            try:
+                with safe_open(projector_weight_path, framework="pt", device="cpu") as sf:
+                    sd = {k: sf.get_tensor(k) for k in sf.keys()}
+            except Exception as e:
+                raise RuntimeError(f"Failed to read projector weights: {projector_weight_path} due to {e}")
         else:
-            raise RuntimeError(f"Unsupported projector type: {type(self.projector)}")
+            bin_path = (
+                projector_weight_path[:-14] + ".bin"
+                if projector_weight_path.endswith(".safetensors")
+                else projector_weight_path
+            )
+            if os.path.isfile(bin_path):
+                try:
+                    sd = torch.load(bin_path, map_location="cpu")
+                    if not isinstance(sd, dict):
+                        raise RuntimeError("Loaded non-dict state from bin file")
+                    print(f"[debug] fallback load projector weights from {bin_path}")
+                except Exception as e:
+                    raise RuntimeError(f"Failed to read projector weights: {bin_path} due to {e}")
+            else:
+                raise RuntimeError(f"Projector weight file not found: {projector_weight_path}")
 
-        found = False
-        for sd in iter_state_dicts(weight_dir):
-            if try_assign_from_keydict(sd):
-                found = True
-                break
-
-        if not found:
+        # 加载 projector（必要）
+        projector_loaded = assign_projector_from_state(sd)
+        if not projector_loaded:
             raise RuntimeError(
                 "Projector weights not found in checkpoint. "
                 "Expected keys like 'model.mm_projector.{0,2}.(weight|bias)' or "
@@ -197,11 +223,18 @@ class Mineru2VisionModel:
                 "or 'model.mm_projector.(weight|bias)'."
             )
 
+        # 可选加载 vision_tower
+        vision_loaded, vision_loaded_keys = try_load_vision_tower(sd)
+        if vision_loaded:
+            print(f"[debug] vision_tower weights loaded from checkpoint: keys={vision_loaded_keys}")
+        else:
+            print("[debug] vision_tower weights not found in checkpoint or skipped; keep pretrained weights")
+
     def load_model(self, weight_dir):
         print(f"[debug] load vision model: {weight_dir}")
         vision_config = Mineru2QwenConfig.from_pretrained(weight_dir)
 
-        self.vision_tower = build_vision_tower(vision_config)
+        self.vision_tower = build_vision_tower(weight_dir, vision_config)
         self.vision_tower.eval()
         self.vision_tower.requires_grad_(False)
         self.projector = build_vision_projector(vision_config)

@@ -16,7 +16,7 @@ def run(query, uris):
     data = {
         "inputs": query,
         "parameters": {
-            "max_new_tokens": 128,
+            "max_new_tokens": 512,
             "ignore_eos": False,
             # The space before <|endoftext|> is important,
             # the server will remove the first bos_token_id,
