@@ -63,28 +63,36 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
         raise NotImplementedError
 
     def get_image_token_length(self, img: ImageItem):
-        # 对于 Mineru2 集成，视觉塔返回的是每个裁剪的一条 pooled 向量。
-        # token 数应与裁剪数量一致：anyres 模式为 1（原图）+ 网格裁剪数，且每块含双视图（factor=2）。
+        # 切回 patch 序列：总token数 = 视图数 × 每视图patch数
+        # 每视图patch数 = self.image_length = (image_size // patch_size) ** 2
         aspect = getattr(self.image_processor, "image_aspect_ratio", None)
+        patch_len = int(self.image_length)
         try:
             if aspect and (aspect == "anyres" or (isinstance(aspect, str) and "anyres_max" in aspect)):
                 crop_size = self.image_processor.crop_size["height"]
                 grid_w, grid_h = get_anyres_image_grid_shape(
                     (img.image_w, img.image_h), self.image_processor.image_grid_pinpoints, crop_size
                 )
-                base = int(grid_w * grid_h + 1)
-                token_num = base
+                views = int(grid_w * grid_h + 1)
+                token_num = views * patch_len
                 print(
                     f"[debug] mineru2_tokenizer anyres img_size=({img.image_w},{img.image_h}) "
-                    f"crop={crop_size} grid=({grid_w},{grid_h}) base={base} token_num={token_num}"
+                    f"crop={crop_size} grid=({grid_w},{grid_h}) views={views}"
+                    f" patch_len={patch_len} token_num={token_num}"
                 )
                 return token_num
             else:
-                print(f"[debug] mineru2_tokenizer non-anyres token_num=1 aspect={aspect}")
-                return 1
+                token_num = patch_len
+                print(
+                    f"[debug] mineru2_tokenizer non-anyres views=1 patch_len={patch_len}"
+                    f" token_num={token_num} aspect={aspect}"
+                )
+                return token_num
         except Exception as e:
-            print(f"[debug] mineru2_tokenizer token_num_fallback due to {e}, return 1")
-            return 1
+            # 兜底：按单视图返回
+            token_num = patch_len
+            print(f"[debug] mineru2_tokenizer token_num_fallback due to {e}, return {token_num}")
+            return token_num
 
     def get_audio_token_length(self, audio: AudioItem):
         raise NotImplementedError
