@@ -38,12 +38,14 @@ query = """
 <|im_start|>system
 You are a helpful assistant.<|im_end|>
 <|im_start|>user
-<img></img>
-这张图片中的内容是什么<|im_end|>
+<image>
+这张图片中的文字是什么<|im_end|>
 <|im_start|>assistant
 """
 
-response = run(uris=["https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"], query=query)
+response = run(
+    uris=["https://pigkiller-011955-1319328397.cos.ap-beijing.myqcloud.com/img/202509161802183.png"], query=query
+)
 
 if response.status_code == 200:
     print(f"Result: {response.json()}")

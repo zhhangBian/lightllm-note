@@ -94,35 +94,36 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
         if multimodal_params is None:
             return self.tokenizer.encode(prompt, add_special_tokens=add_special_tokens)
 
-        # TEXT<image>TEXT<image>TEXT --> TEXT<img></img>TEXT<img></img>TEXT
-        image_tokens = IMG_START_TOKEN + IMG_END_TOKEN
-        image_count = len(multimodal_params.images)
-        prompt = prompt.replace(image_tokens, IMG_TOKEN, image_count)
+        prompt = prompt.replace(IMG_START_TOKEN + IMG_END_TOKEN, IMG_TOKEN)
 
         origin_ids = self.tokenizer.encode(prompt, add_special_tokens=add_special_tokens)
-        # <image>
+        print(f"[debug] mineru2_tokenizer origin_ids={origin_ids}")
+
+        # 单标记<image>：遇到img_token_index，直接展开K个占位token
         input_ids = []
         image_id = 0
-        start_idx = 0
-        while True:
-            try:
-                start_idx = origin_ids.index(self.img_token_index, start_idx)
-                if start_idx + 1 >= len(origin_ids):
-                    break
-                if origin_ids[start_idx + 1] == self.image_end_id:
-                    input_ids.extend(origin_ids[: start_idx + 1])
-                    token_id = multimodal_params.images[image_id].token_id
-                    token_num = multimodal_params.images[image_id].token_num
-                    input_ids.extend(range(token_id, token_id + token_num))
-                    input_ids.append(self.image_end_id)
-                    origin_ids = origin_ids[start_idx + 2 :]
-                    start_idx = 0
-                    image_id += 1
-                else:
-                    raise ValueError("image token error")
-            except ValueError:
-                break
-        input_ids.extend(origin_ids[start_idx:])
+        i = 0
+        while i < len(origin_ids):
+            tok = origin_ids[i]
+            if tok == self.img_token_index:
+                if image_id >= len(multimodal_params.images):
+                    print("[warning] mineru2_tokenizer more <image> than provided images, keep literal token")
+                    input_ids.append(tok)
+                    i += 1
+                    continue
+                token_id = multimodal_params.images[image_id].token_id
+                token_num = multimodal_params.images[image_id].token_num
+                input_ids.extend(range(token_id, token_id + token_num))
+                image_id += 1
+                i += 1
+            else:
+                input_ids.append(tok)
+                i += 1
+
+        # 若有多余的图像对象，忽略并提示
+        if image_id < len(multimodal_params.images):
+            print(f"[warning] mineru2_tokenizer unused images: {len(multimodal_params.images) - image_id}")
+
         print(f"[debug] mineru2_tokenizer input_ids={input_ids}")
         return input_ids
 
