@@ -286,7 +286,6 @@ class HttpServerManager:
             )
             # 给img id
             prompt_ids = await self._encode(prompt, multimodal_params, sampling_params)
-            print(f"[debug] generate prompt_ids: {prompt_ids}")
             prompt_tokens = len(prompt_ids)
             # 监控
             if group_request_id > 0:

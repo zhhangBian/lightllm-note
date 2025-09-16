@@ -8,8 +8,6 @@ from lightllm.server.core.objs import SamplingParams
 from lightllm.models.registry import ModelRegistry
 from lightllm.models.qwen2.model import Qwen2TpPartModel
 from lightllm.models.qwen_vl.layer_infer.pre_layer_infer import LlamaMultimodalPreLayerInfer
-from lightllm.models.internvl.layer_weights.pre_and_post_layer_weight import InternVLLlamaPreAndPostLayerWeight
-from lightllm.models.internvl.img_process import get_image_patch
 
 from ..mineru2_qwen.image_processing_mineru2 import Mineru2ImageProcessor
 from .image_processing_mineru2 import get_anyres_image_grid_shape
@@ -65,34 +63,20 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
     def get_image_token_length(self, img: ImageItem):
         # 切回 patch 序列：总token数 = 视图数 × 每视图patch数
         # 每视图patch数 = self.image_length = (image_size // patch_size) ** 2
-        aspect = getattr(self.image_processor, "image_aspect_ratio", None)
         patch_len = int(self.image_length)
-        try:
-            if aspect and (aspect == "anyres" or (isinstance(aspect, str) and "anyres_max" in aspect)):
-                crop_size = self.image_processor.crop_size["height"]
-                grid_w, grid_h = get_anyres_image_grid_shape(
-                    (img.image_w, img.image_h), self.image_processor.image_grid_pinpoints, crop_size
-                )
-                views = int(grid_w * grid_h + 1)
-                token_num = views * patch_len
-                print(
-                    f"[debug] mineru2_tokenizer anyres img_size=({img.image_w},{img.image_h}) "
-                    f"crop={crop_size} grid=({grid_w},{grid_h}) views={views}"
-                    f" patch_len={patch_len} token_num={token_num}"
-                )
-                return token_num
-            else:
-                token_num = patch_len
-                print(
-                    f"[debug] mineru2_tokenizer non-anyres views=1 patch_len={patch_len}"
-                    f" token_num={token_num} aspect={aspect}"
-                )
-                return token_num
-        except Exception as e:
-            # 兜底：按单视图返回
-            token_num = patch_len
-            print(f"[debug] mineru2_tokenizer token_num_fallback due to {e}, return {token_num}")
-            return token_num
+
+        crop_size = self.image_processor.crop_size["height"]
+        grid_w, grid_h = get_anyres_image_grid_shape(
+            (img.image_w, img.image_h), self.image_processor.image_grid_pinpoints, crop_size
+        )
+        views = int(grid_w * grid_h + 1)
+        token_num = views * patch_len
+        print(
+            f"[debug] mineru2_tokenizer anyres img_size=({img.image_w},{img.image_h}) "
+            f"crop={crop_size} grid=({grid_w},{grid_h}) views={views}"
+            f" patch_len={patch_len} token_num={token_num}"
+        )
+        return token_num
 
     def get_audio_token_length(self, audio: AudioItem):
         raise NotImplementedError
@@ -132,15 +116,11 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
         if image_id < len(multimodal_params.images):
             print(f"[warning] mineru2_tokenizer unused images: {len(multimodal_params.images) - image_id}")
 
-        print(f"[debug] mineru2_tokenizer input_ids={input_ids}")
         return input_ids
 
 
 @ModelRegistry("mineru2_qwen", is_multimodal=True)
 class Mineru2QwenForCausalLM(Qwen2TpPartModel):
-    # weight class
-    # pre_and_post_weight_class = InternVLLlamaPreAndPostLayerWeight
-
     # infer class
     pre_layer_infer_class = LlamaMultimodalPreLayerInfer
 
