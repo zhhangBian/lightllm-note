@@ -87,7 +87,6 @@ def get_tokenizer(
     elif model_type == "qwen" and "visual" in model_cfg:
         tokenizer = QWenVLTokenizer(tokenizer, model_cfg)
     elif model_type == "mineru2_qwen":
-        print(f"[debug] use mineru2_qwen tokenizer, model_cfg: {model_cfg}")
         tokenizer = Mineru2QwenTokenizer(tokenizer, model_cfg)
     elif model_type in ["qwen2_vl", "qwen2_5_vl"] and "vision_config" in model_cfg:
         from transformers import AutoProcessor
