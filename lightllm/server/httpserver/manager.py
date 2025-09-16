@@ -114,7 +114,6 @@ class HttpServerManager:
         self.latest_success_infer_time_mark.set_value(int(time.time()))
         return
 
-    # 唯一的一处给img id
     async def _alloc_resource(self, items, md5sums, token_nums, datas):
 
         while True:
@@ -278,7 +277,6 @@ class HttpServerManager:
             await self._log_req_header(request_headers, group_request_id)
             # 监控
 
-            # 给img id
             prompt_ids = await self._encode(prompt, multimodal_params, sampling_params)
             prompt_tokens = len(prompt_ids)
             # 监控
