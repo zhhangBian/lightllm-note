@@ -1,6 +1,5 @@
 import re
-import os
-import json
+import math
 
 from lightllm.common.basemodel.multimodal_tokenizer import BaseMultiModalTokenizer
 from lightllm.server.multimodal_params import AudioItem, MultimodalParams, ImageItem
@@ -11,7 +10,6 @@ from lightllm.models.qwen_vl.layer_infer.pre_layer_infer import LlamaMultimodalP
 
 from ..mineru2_qwen.image_processing_mineru2 import Mineru2ImageProcessor
 from .image_processing_mineru2 import get_anyres_image_grid_shape
-import math
 
 IMG_START_TOKEN = "<img>"
 IMG_END_TOKEN = "</img>"

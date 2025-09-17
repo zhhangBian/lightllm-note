@@ -176,7 +176,7 @@ class Mineru2VisionModel:
         valid_ids: List[List[int]] = []
         image_aspect_ratio = getattr(self.image_processor, "image_aspect_ratio", None)
         image_grid_pinpoints = getattr(self.image_processor, "image_grid_pinpoints", None)
-        # 每视图 patch_len（例如 384/14=27, 27^2=729）
+        # 每视图 patch_len
         patch_side = self.vision_tower.config.image_size // self.vision_tower.config.patch_size
         patch_len = patch_side * patch_side
 
@@ -231,8 +231,6 @@ class Mineru2VisionModel:
                 img_tensors.append(t)
             else:
                 raise Exception("Unsupport input types: {} for {}".format(type(img), img))
-
-            # 暂不累加 valid_ids，待完成重组后依据真实长度填写
 
         if len(img_tensors) <= 0:
             return None, [], []
