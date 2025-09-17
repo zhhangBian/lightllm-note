@@ -11,6 +11,7 @@ from lightllm.models.qwen_vl.layer_infer.pre_layer_infer import LlamaMultimodalP
 
 from ..mineru2_qwen.image_processing_mineru2 import Mineru2ImageProcessor
 from .image_processing_mineru2 import get_anyres_image_grid_shape
+import math
 
 IMG_START_TOKEN = "<img>"
 IMG_END_TOKEN = "</img>"
@@ -61,22 +62,46 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
         raise NotImplementedError
 
     def get_image_token_length(self, img: ImageItem):
-        # 切回 patch 序列：总token数 = 视图数 × 每视图patch数
-        # 每视图patch数 = self.image_length = (image_size // patch_size) ** 2
+        # 非 anyres：单视图，仅 base patch 序列
         patch_len = int(self.image_length)
+        aspect_ratio = getattr(self.image_processor, "image_aspect_ratio", None)
+        if not aspect_ratio or ("anyres" not in str(aspect_ratio)):
+            return patch_len
 
+        # anyres：按 ref 的 spatial + unpad + anyres_max 逻辑计数
         crop_size = self.image_processor.crop_size["height"]
         grid_w, grid_h = get_anyres_image_grid_shape(
             (img.image_w, img.image_h), self.image_processor.image_grid_pinpoints, crop_size
         )
-        views = int(grid_w * grid_h + 1)
-        token_num = views * patch_len
-        print(
-            f"[debug] mineru2_tokenizer anyres img_size=({img.image_w},{img.image_h}) "
-            f"crop={crop_size} grid=({grid_w},{grid_h}) views={views}"
-            f" patch_len={patch_len} token_num={token_num}"
-        )
-        return token_num
+        # base 视图（原图等比到 crop）
+        base_tokens = patch_len
+        patch_side = int(math.sqrt(patch_len))
+        # h, w 为拼接后的整体网格尺寸（单位：patch）
+        h = int(grid_h * patch_side)
+        w = int(grid_w * patch_side)
+
+        new_h, new_w = h, w
+        max_num_patches = None
+        m = re.search(r"anyres_max_(\d+)", str(aspect_ratio))
+        if m:
+            max_num_patches = int(m.group(1))
+            times = math.sqrt((h * w) / (max_num_patches * patch_len))
+            if times > 1.1:
+                new_h = int(new_h // times)
+                new_w = int(new_w // times)
+        # 每行追加换行 token，数量等于行数 new_h
+        extra_tokens = int(new_h * (new_w + 1))
+        total_tokens = int(base_tokens + extra_tokens)
+
+        print(f"[debug][spatial] P={patch_side}, N={patch_len}, Nx={grid_w}, Ny={grid_h}, crops={grid_w*grid_h}")
+        if max_num_patches is not None:
+            times = math.sqrt((h * w) / (max_num_patches * patch_len))
+            print(
+                f"[debug][spatial+unpad+anyres_max] h={h}, w={w}, "
+                f"times={times:.4f}, h'={new_h}, w'={new_w}, newline={new_h}, extra_tokens~={extra_tokens}"
+            )
+        print(f"[debug][spatial] base_tokens={base_tokens}, extra_tokens={extra_tokens}, total_tokens={total_tokens}")
+        return total_tokens
 
     def get_audio_token_length(self, audio: AudioItem):
         raise NotImplementedError

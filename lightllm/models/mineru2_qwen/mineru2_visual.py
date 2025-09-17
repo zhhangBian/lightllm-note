@@ -6,6 +6,7 @@ from PIL import Image
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 from transformers import (
     CLIPVisionModel,
@@ -14,7 +15,12 @@ from transformers import (
 )
 
 from .configuration_mineru2 import Mineru2QwenConfig
-from .image_processing_mineru2 import Mineru2ImageProcessor, expand2square, process_anyres_image
+from .image_processing_mineru2 import (
+    Mineru2ImageProcessor,
+    expand2square,
+    process_anyres_image,
+    get_anyres_image_grid_shape,
+)
 
 from lightllm.server.multimodal_params import ImageItem
 from lightllm.server.embed_cache.utils import read_shm, get_shm_name_data
@@ -179,7 +185,9 @@ class Mineru2VisionModel:
                 uuids.append(img.uuid)
                 image_data = read_shm(get_shm_name_data(img.uuid))
                 image_data = Image.open(BytesIO(image_data)).convert("RGB")
-                if image_aspect_ratio == "pad":
+                # 多图/视频强制 pad，单图才允许 anyres
+                force_pad = len(images) > 1
+                if image_aspect_ratio == "pad" or force_pad:
                     image_proc = expand2square(image_data, tuple(int(x * 255) for x in self.image_processor.image_mean))
                     t = self.image_processor.preprocess(image_proc, return_tensors="pt")["pixel_values"]
                 elif image_aspect_ratio and (image_aspect_ratio == "anyres" or "anyres_max" in image_aspect_ratio):
@@ -194,16 +202,18 @@ class Mineru2VisionModel:
                 elif t.ndim == 3:
                     t = t.unsqueeze(0)
 
-                # 对齐实际视图数 K 与期望 token（可能是 K 或 K*patch_len）
-                expected_token = img.token_num if getattr(img, "token_num", None) is not None else None
+                # 对齐实际视图数 K 与期望视图数（anyres: Nx*Ny+1；否则：1）
                 actual_k = t.shape[0]
-                if expected_token is None or expected_token <= 0:
-                    expected_views = actual_k
+                if (
+                    image_aspect_ratio and (image_aspect_ratio == "anyres" or "anyres_max" in image_aspect_ratio)
+                ) and not force_pad:
+                    crop_size = self.image_processor.crop_size["height"]
+                    grid_w, grid_h = get_anyres_image_grid_shape(
+                        (img.image_w, img.image_h), image_grid_pinpoints, crop_size
+                    )
+                    expected_views = int(grid_w * grid_h + 1)
                 else:
-                    if expected_token >= patch_len and expected_token % patch_len == 0:
-                        expected_views = expected_token // patch_len
-                    else:
-                        expected_views = expected_token
+                    expected_views = 1
                 if actual_k != expected_views:
                     if actual_k % expected_views == 0:
                         factor = actual_k // expected_views
@@ -219,26 +229,86 @@ class Mineru2VisionModel:
                             pad = t[-1:].repeat(expected_views - actual_k, 1, 1, 1)
                             t = torch.cat([t, pad], dim=0)
                 img_tensors.append(t)
-                # 最终视图数 K
-                final_views = t.shape[0]
-                # 对齐 patch 序列后的总 token 数
-                img.token_num = final_views * patch_len
             else:
                 raise Exception("Unsupport input types: {} for {}".format(type(img), img))
 
-            # 本图对应的 token 数（视图 * patch_len）
-            if isinstance(img_tensors[-1], torch.Tensor) and img_tensors[-1].dim() == 4:
-                cur_num = img_tensors[-1].shape[0] * patch_len
-            else:
-                cur_num = patch_len
-            valid_ids.append([valid_id, valid_id + cur_num])
-            valid_id += cur_num
+            # 暂不累加 valid_ids，待完成重组后依据真实长度填写
 
         if len(img_tensors) <= 0:
             return None, [], []
         # 保证全部为4维后拼接
         img = torch.cat(img_tensors, dim=0)
         img = img.cuda()
+        # 提取所有视图的 patch 序列嵌入（views * patch_len, hidden）
         all_img_embeds = self.forward(img)
 
-        return all_img_embeds, uuids, valid_ids
+        # 将每张图的视图嵌入进行 spatial+unpad(+anyres_max) 重组，并追加换行列
+        new_embeds: List[torch.Tensor] = []
+        cur = 0
+        for i, img in enumerate(images):
+            # 计算本图视图数
+            t = img_tensors[i]
+            K = t.shape[0]
+            # 取出本图的所有 view 的 patch 序列嵌入
+            tokens_len = K * patch_len
+            cur_views_embeds = all_img_embeds[cur : cur + tokens_len]
+            cur += tokens_len
+
+            # 非 anyres 或多图/视频强制 pad：直接使用展平序列（K 通常为 1）
+            force_pad = len(images) > 1
+            aspect = getattr(self.image_processor, "image_aspect_ratio", None)
+            if not aspect or ("anyres" not in str(aspect)) or force_pad or K <= 1:
+                seq = cur_views_embeds
+                new_embeds.append(seq)
+                # 记录区间
+                valid_ids.append([valid_id, valid_id + seq.shape[0]])
+                valid_id += seq.shape[0]
+                continue
+
+            # anyres 单图路径：
+            # 切分 base 视图与其余视图
+            base_feature = cur_views_embeds[:patch_len]
+            rest = cur_views_embeds[patch_len:]
+            # (K-1, patch_len, hidden)
+            hidden = rest.shape[-1]
+            rest = rest.view(K - 1, patch_len, hidden)
+
+            # 计算 Nx, Ny
+            crop_size = self.image_processor.crop_size["height"]
+            grid_w, grid_h = get_anyres_image_grid_shape((img.image_w, img.image_h), image_grid_pinpoints, crop_size)
+            # (Ny, Nx, patch_side, patch_side, hidden)
+            rest = rest.view(grid_w * grid_h, patch_side, patch_side, hidden)
+            rest = rest.view(grid_h, grid_w, patch_side, patch_side, hidden)
+            # (hidden, Ny, patch_side, Nx, patch_side) -> (hidden, H, W)
+            rest = rest.permute(4, 0, 2, 1, 3).contiguous()
+            H = grid_h * patch_side
+            W = grid_w * patch_side
+            rest = rest.view(hidden, H, W)
+
+            # anyres_max 下采样
+            m = re.search(r"anyres_max_(\d+)", str(aspect))
+            if m is not None:
+                max_num_patches = int(m.group(1))
+                times = (H * W) / (max_num_patches * patch_len)
+                if times > 1.1:
+                    scale = (int(H // (times ** 0.5)), int(W // (times ** 0.5)))
+                    rest = F.interpolate(rest.unsqueeze(0), size=scale, mode="bilinear", align_corners=False)[0]
+                    H, W = rest.shape[1], rest.shape[2]
+
+            # 追加换行列（列数+1），换行列取 0 向量占位
+            newline_col = torch.zeros((hidden, H, 1), device=rest.device, dtype=rest.dtype)
+            rest = torch.cat([rest, newline_col], dim=2)  # (hidden, H, W+1)
+            # 展平成 (H*(W+1), hidden)
+            rest = rest.flatten(1, 2).transpose(0, 1).contiguous()
+
+            # 拼接 base + 其余
+            seq = torch.cat([base_feature, rest], dim=0)
+            new_embeds.append(seq)
+
+            # 记录区间
+            valid_ids.append([valid_id, valid_id + seq.shape[0]])
+            valid_id += seq.shape[0]
+
+        # 拼接所有图的重组后嵌入
+        all_new = torch.cat(new_embeds, dim=0)
+        return all_new, uuids, valid_ids
