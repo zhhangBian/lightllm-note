@@ -89,7 +89,6 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
         prompt = prompt.replace(IMG_START_TOKEN + IMG_END_TOKEN, IMG_TOKEN)
 
         origin_ids = self.tokenizer.encode(prompt, add_special_tokens=add_special_tokens)
-        print(f"[debug] mineru2_tokenizer origin_ids={origin_ids}")
 
         # 单标记<image>：遇到img_token_index，直接展开K个占位token
         input_ids = []
@@ -99,7 +98,6 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
             tok = origin_ids[i]
             if tok == self.img_token_index:
                 if image_id >= len(multimodal_params.images):
-                    print("[warning] mineru2_tokenizer more <image> than provided images, keep literal token")
                     input_ids.append(tok)
                     i += 1
                     continue
@@ -111,10 +109,6 @@ class Mineru2QwenTokenizer(BaseMultiModalTokenizer):
             else:
                 input_ids.append(tok)
                 i += 1
-
-        # 若有多余的图像对象，忽略并提示
-        if image_id < len(multimodal_params.images):
-            print(f"[warning] mineru2_tokenizer unused images: {len(multimodal_params.images) - image_id}")
 
         return input_ids
 
