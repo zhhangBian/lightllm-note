@@ -107,6 +107,7 @@ class G_Objs:
             )
             dp_size_in_node = max(1, args.dp // args.nnodes)  # 兼容多机纯tp的运行模式，这时候 1 // 2 == 0, 需要兼容
             self.shared_token_load = TokenLoad(f"{get_unique_server_name()}_shared_token_load", dp_size_in_node)
+            logger.info(f"[debug] Lightllm server started with args: {args}")
 
 
 g_objs = G_Objs()

@@ -4,6 +4,7 @@ import time
 import uuid
 import subprocess
 import signal
+import threading
 from lightllm.utils.net_utils import alloc_can_use_network_port, PortLocker
 from lightllm.utils.start_utils import process_manager, kill_recursive
 from .metrics.manager import start_metric_manager
@@ -52,8 +53,12 @@ def setup_signal_handlers(http_server_process, process_manager):
             logger.info("All processes have been terminated gracefully.")
             sys.exit(0)
 
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
+    # Only register signals in the main thread of the main interpreter
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
+    else:
+        logger.info("Not in main thread; skipping signal handler registration for SIGTERM/SIGINT")
 
     logger.info(f"start process pid {os.getpid()}")
     logger.info(f"http server pid {http_server_process.pid}")
@@ -350,7 +355,8 @@ def normal_or_p_d_start(args):
 
         process_manager.start_submodule_processes(start_funcs=[start_health_check_process], start_args=[(args,)])
     setup_signal_handlers(http_server_process, process_manager)
-    http_server_process.wait()
+    if args.run_mode != "engine":
+        http_server_process.wait()
     return
 
 
