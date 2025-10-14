@@ -265,6 +265,13 @@ async def completions(request: CompletionRequest, raw_request: Request) -> Respo
     return resp
 
 
+# TODO
+@app.get("/v1/models")
+async def models(request: Request) -> Response:
+    ans_dict = {"data": [{"id": "model_name", "object": "model", "owned_by": "owner"}]}
+    return JSONResponse(ans_dict, status_code=200)
+
+
 @app.get("/tokens")
 @app.post("/tokens")
 async def tokens(request: Request):
